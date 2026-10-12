@@ -59,6 +59,34 @@ describe('runWithTimeout', () => {
     expect(signals.listenerCount('SIGINT')).toBe(0);
   });
 
+  it('kills a TERM-ignoring grandchild after an interrupt', async () => {
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'chreode-step-')), 'pid');
+    const signals = new EventEmitter();
+    const pending = runWithTimeout(
+      `sh -c 'trap "" TERM; sleep 30' & echo $! > ${pidFile}; wait`,
+      60_000,
+      { signals }
+    );
+    setTimeout(() => signals.emit('SIGINT'), 300);
+    const r = await pending;
+    expect(r.interrupted).toBe(true);
+    const grandchild = Number(readFileSync(pidFile, 'utf8'));
+    await new Promise((res) => setTimeout(res, 200));
+    expect(() => process.kill(grandchild, 0)).toThrow();
+  });
+
+  it('a second signal escalates to SIGKILL promptly', async () => {
+    const signals = new EventEmitter();
+    const started = Date.now();
+    const pending = runWithTimeout('trap "" TERM; sleep 30', 60_000, { signals });
+    setTimeout(() => signals.emit('SIGINT'), 300);
+    setTimeout(() => signals.emit('SIGINT'), 600);
+    const r = await pending;
+    expect(r.interrupted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(signals.listenerCount('SIGINT')).toBe(0);
+  });
+
   it('captures all of stderr, even past the pipe buffer', async () => {
     const r = await runWithTimeout(`node -e "process.stderr.write('x'.repeat(200000))"`, 10_000, {
       captureStderr: true,

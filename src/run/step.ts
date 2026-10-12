@@ -31,6 +31,9 @@ export interface RunOptions {
  *  inherited the pipe can hold it open; this bounds the wait. */
 const STDERR_DRAIN_MS = 2_000;
 
+/** After forwarding SIGINT/SIGTERM, how long a step gets to exit before its group is SIGKILLed. */
+export const INTERRUPT_GRACE_MS = 3_000;
+
 /**
  * Run a shell command with a hard wall-clock timeout. The command runs in its OWN process
  * group (detached) so a timeout can SIGKILL the whole tree, not just the wrapping shell.
@@ -66,9 +69,17 @@ export function runWithTimeout(
         // Group already gone.
       }
     };
+    let graceTimer: NodeJS.Timeout | undefined;
     const onSignal = () => {
+      if (interrupted) {
+        // A second Ctrl-C means "now".
+        killGroup('SIGKILL');
+        return;
+      }
       interrupted = true;
       killGroup('SIGTERM');
+      graceTimer = setTimeout(() => killGroup('SIGKILL'), INTERRUPT_GRACE_MS);
+      graceTimer.unref();
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -81,6 +92,9 @@ export function runWithTimeout(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(graceTimer);
+      // Reap survivors of the leader's exit (e.g. TERM-ignoring grandchildren).
+      if (interrupted) killGroup('SIGKILL');
       signals.off('SIGINT', onSignal);
       signals.off('SIGTERM', onSignal);
       resolve({ code, timedOut, interrupted, stderr: capture ? stderrBuf : undefined });
