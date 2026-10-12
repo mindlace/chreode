@@ -1,0 +1,72 @@
+{
+  "name": "@mindlace/chreode",
+  "version": "0.1.0",
+  "description": "A deterministic, selective, unavoidable local-CI gate for agent-written code",
+  "keywords": [
+    "ci",
+    "signoff",
+    "git",
+    "github",
+    "agents",
+    "gate"
+  ],
+  "license": "MIT",
+  "author": "Ethan Fremen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mindlace/chreode.git"
+  },
+  "homepage": "https://github.com/mindlace/chreode#readme",
+  "bugs": {
+    "url": "https://github.com/mindlace/chreode/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "chreode": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "signoff": "npm run build && node dist/cli.js signoff",
+    "protect": "npm run build && node dist/cli.js protect"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "jiti": "^2.7.0",
+    "picomatch": "^4.0.7",
+    "proper-lockfile": "^4.1.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "@types/picomatch": "^4.0.3",
+    "@types/proper-lockfile": "^4.1.4",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10"
+  }
+}
