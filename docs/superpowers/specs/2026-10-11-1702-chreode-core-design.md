@@ -194,7 +194,7 @@ payloads.
 
 ## Package shape
 
-- Repo `github.com/mindlace/chreode` (private for now), local at
+- Repo `github.com/mindlace/chreode` (public), local at
   `~/Projects/chreode`. MIT, TypeScript (ESM, strict), Node ≥ 22. Package
   `@mindlace/chreode`, compiled to `dist/` (consumers need no `tsx`). Bin:
   `chreode`.
@@ -255,11 +255,15 @@ Adoption PR in sfhousing:
 
 ## Distribution
 
-sfhousing's hosted CI runs `npm ci`, so it needs `@mindlace/chreode` to
-resolve from a registry — a `file:` dependency on a sibling checkout won't.
-The source repo is private for now, which constrains where the package can
-live (see open question 1). Publishing is the user's call and happens only on
-their go-ahead.
+Public npm, `@mindlace/chreode`, MIT. `.github/workflows/publish.yml`
+publishes on a `v*` tag via npm trusted publishing (OIDC, `id-token: write`,
+provenance automatic for a public repo; `prepack` builds `dist/`). npm only
+lets a trusted publisher be attached to a package that already exists, so
+**v0.1.0 is published by hand by the user** (`npm login`, `npm publish
+--access public`), after which they attach the trusted publisher
+(`mindlace/chreode`, workflow `publish.yml`) in the npm package settings;
+later versions publish from tags. sfhousing then installs it like any other
+dependency — no registry mapping or tokens.
 
 ## Planafoot (later)
 
@@ -274,13 +278,7 @@ chreode run there is a full run.
 
 - Default status context `chreode/signoff`; sfhousing switches to it.
 - Package `@mindlace/chreode`; bin `chreode`.
-- GitHub repo private for now.
+- GitHub repo public; MIT.
+- Registry: public npm (see Distribution).
 - One machine-global lock across all chreode repos (the contended resource is
   the machine, not the repo).
-- Registry: **GitHub Packages, private**, until the Hover pitch; then public
-  npm. A chreode workflow publishes `@mindlace/chreode` to
-  `npm.pkg.github.com` on a `v*` tag (`GITHUB_TOKEN`, `packages: write`). The
-  package grants `mindlace/sfhousing` read access, so sfhousing CI installs
-  with its own `GITHUB_TOKEN` (`packages: read`; its `.npmrc` maps `@mindlace`
-  to the GitHub registry). Local installs need a `read:packages` token in
-  `~/.npmrc` — the user sets that up by hand.
