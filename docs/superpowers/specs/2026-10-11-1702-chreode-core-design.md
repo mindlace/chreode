@@ -98,7 +98,7 @@ import { defineConfig } from 'chreode';
 
 export default defineConfig({
   baseBranch: 'main', // default
-  statusContext: 'local-ci/signoff', // default
+  statusContext: 'chreode/signoff', // default
 
   // First match wins. `match`: glob (picomatch) or RegExp, or an array of them.
   // `triggers: []` means "matched, nothing to run" (e.g. docs that need nothing).
@@ -194,9 +194,10 @@ payloads.
 
 ## Package shape
 
-- Repo `~/Projects/chreode`, MIT, TypeScript (ESM, strict), Node ≥ 22.
-  Published to npm as `chreode`, compiled to `dist/` (consumers need no
-  `tsx`). Bin: `chreode`.
+- Repo `github.com/mindlace/chreode` (private for now), local at
+  `~/Projects/chreode`. MIT, TypeScript (ESM, strict), Node ≥ 22. Package
+  `@mindlace/chreode`, compiled to `dist/` (consumers need no `tsx`). Bin:
+  `chreode`.
 - Dependencies: `commander`, `proper-lockfile`, `jiti`, `picomatch`. Runtime
   requirements: `git`, `gh` (authenticated).
 - Modules (lifted from upstream where noted, upstream is ~1,200 LOC):
@@ -206,8 +207,10 @@ payloads.
   `signoff/plan.ts` (rules → triggers → steps, pure), `signoff/run.ts`
   (orchestration), `signoff/tail.ts`, `github/status.ts`, `github/protect.ts`,
   `cli.ts`.
-- chreode gates itself: its own `chreode.config.ts`, its own `local-ci/signoff`
-  requirement, from the first PR after bootstrap.
+- chreode gates itself: its own `chreode.config.ts`, and `chreode protect` on
+  its own `main` (requiring `chreode/signoff`) once the gate works — the
+  bootstrap PR is the last one merged without it. The gate runs from the
+  checkout's own build (`node dist/cli.js`), not a published version.
 
 ## Testing
 
@@ -227,25 +230,36 @@ payloads.
 
 sfhousing already gates merges on `local-ci/signoff` (branch protection is
 live) via a hand-ported, non-incremental `scripts/signoff.ts` that runs check,
-lint, unit and e2e on every run. Adoption PR in sfhousing:
+lint, unit and e2e on every run. It moves to the `chreode/signoff` context.
+Adoption PR in sfhousing:
 
-- Add `chreode` as a devDependency; add `chreode.config.ts` with rules for
-  `src/`, `e2e/`, `scripts/`, docs/markdown, workflows, and steps
+- Add `@mindlace/chreode` as a devDependency; add `chreode.config.ts` with
+  rules for `src/`, `e2e/`, `scripts/`, docs/markdown, workflows, and steps
   `lint`, `check`, `test:unit`, `test:e2e`, `lint:workflows` (exact rules
   drafted against sfhousing's tree in the implementation plan — anything
   unmatched, e.g. the data pipeline, falls through to "run everything").
 - `package.json`: `"signoff": "chreode signoff"`, `"branch-protection":
   "chreode protect"`; delete `scripts/signoff.ts`, its spec,
-  `scripts/branch-protection.ts`, and `scripts/gh-repo.ts` if nothing else uses it.
-- Update `CLAUDE.md` / `docs/dev/deploy.md`. The status context is unchanged,
-  so branch protection and the release-please workflow need no change.
-- The in-flight sfhousing branch `feat/signoff-docs-fast-path` is subsumed by
-  incremental planning — the user decides whether to drop it.
+  `scripts/branch-protection.ts`, and `scripts/gh-repo.ts` if nothing else
+  uses it.
+- `.github/workflows/release-please.yml` posts the status on the release PR
+  head; its context changes from `local-ci/signoff` to `chreode/signoff`.
+- Update `CLAUDE.md` / `docs/dev/deploy.md` to the new context and command.
+- **Context switch-over, in order:** sign off the adoption branch with chreode
+  (posts `chreode/signoff`); run `chreode protect` (main now requires
+  `chreode/signoff` instead of `local-ci/signoff`); merge. Every open sfhousing
+  PR then needs a re-signoff under chreode after merging main.
+- Drop the in-flight branch `feat/signoff-docs-fast-path` and its worktree —
+  incremental planning subsumes it (user-approved). Check it for unpushed
+  work worth keeping first.
 
-Distribution for that PR: sfhousing's hosted CI runs `npm ci`, so it needs a
-real published version (a `file:` dependency on a sibling checkout won't
-resolve there). Creating the GitHub repo and publishing to npm are the
-user's call and happen only on their go-ahead.
+## Distribution
+
+sfhousing's hosted CI runs `npm ci`, so it needs `@mindlace/chreode` to
+resolve from a registry — a `file:` dependency on a sibling checkout won't.
+The source repo is private for now, which constrains where the package can
+live (see open question 1). Publishing is the user's call and happens only on
+their go-ahead.
 
 ## Planafoot (later)
 
@@ -256,10 +270,20 @@ then, planafoot and chreode signoffs on one machine do not serialize against
 each other). Its `refs/notes/signoff` history is not migrated — the first
 chreode run there is a full run.
 
+## Decisions
+
+- Default status context `chreode/signoff`; sfhousing switches to it.
+- Package `@mindlace/chreode`; bin `chreode`.
+- GitHub repo private for now.
+- One machine-global lock across all chreode repos (the contended resource is
+  the machine, not the repo).
+
 ## Open questions
 
-1. **Status context default.** Keep `local-ci/signoff` (zero-change adoption
-   for sfhousing and planafoot) or default to `chreode/signoff` (self-
-   describing at Hover)? Draft: keep `local-ci/signoff`; it's configurable.
-2. **Lock scope.** One machine-global lock across all chreode repos (draft) vs.
-   per-repo. Global matches the actual contended resource.
+1. **Registry while the repo is private.** (a) Public npm: simplest for every
+   consumer, but the published tarball exposes the source, so "private"
+   would only cover history and issues. (b) GitHub Packages, private: the
+   package grants `mindlace/sfhousing` read access so its CI installs with
+   `GITHUB_TOKEN`; local installs need a `read:packages` token in
+   `~/.npmrc`. Recommendation: (b) until the Hover pitch, then flip to public
+   npm.
