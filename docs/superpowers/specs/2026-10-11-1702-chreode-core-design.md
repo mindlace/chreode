@@ -277,13 +277,10 @@ chreode run there is a full run.
 - GitHub repo private for now.
 - One machine-global lock across all chreode repos (the contended resource is
   the machine, not the repo).
-
-## Open questions
-
-1. **Registry while the repo is private.** (a) Public npm: simplest for every
-   consumer, but the published tarball exposes the source, so "private"
-   would only cover history and issues. (b) GitHub Packages, private: the
-   package grants `mindlace/sfhousing` read access so its CI installs with
-   `GITHUB_TOKEN`; local installs need a `read:packages` token in
-   `~/.npmrc`. Recommendation: (b) until the Hover pitch, then flip to public
-   npm.
+- Registry: **GitHub Packages, private**, until the Hover pitch; then public
+  npm. A chreode workflow publishes `@mindlace/chreode` to
+  `npm.pkg.github.com` on a `v*` tag (`GITHUB_TOKEN`, `packages: write`). The
+  package grants `mindlace/sfhousing` read access, so sfhousing CI installs
+  with its own `GITHUB_TOKEN` (`packages: read`; its `.npmrc` maps `@mindlace`
+  to the GitHub registry). Local installs need a `read:packages` token in
+  `~/.npmrc` — the user sets that up by hand.
