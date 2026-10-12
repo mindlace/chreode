@@ -1,3 +1,4 @@
+import { FLAKE_LOG_FILE } from '../flakes/log.js';
 import { defaultExec, type Exec } from '../run/exec.js';
 
 export class PreconditionError extends Error {
@@ -13,7 +14,11 @@ export interface Preconditions {
   signer: string;
 }
 
-export function checkPreconditions(baseBranch: string, exec: Exec = defaultExec): Preconditions {
+export function checkPreconditions(
+  baseBranch: string,
+  exec: Exec = defaultExec,
+  opts: { flakes: boolean } = { flakes: false }
+): Preconditions {
   if (exec('git', ['status', '--porcelain']).trim() !== '') {
     throw new PreconditionError('working tree is dirty; commit or stash before signing off');
   }
@@ -36,6 +41,16 @@ export function checkPreconditions(baseBranch: string, exec: Exec = defaultExec)
   }
   if (behind !== '') {
     throw new PreconditionError('HEAD is behind its upstream; pull before signing off');
+  }
+  if (opts.flakes) {
+    try {
+      exec('git', ['check-ignore', '-q', FLAKE_LOG_FILE]);
+    } catch {
+      throw new PreconditionError(
+        '`flakes` is configured but .chreode/ is not gitignored (the flake log would dirty ' +
+          'the tree); add the line `.chreode/` to .gitignore'
+      );
+    }
   }
   try {
     exec('gh', ['auth', 'status']);

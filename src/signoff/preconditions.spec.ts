@@ -32,4 +32,13 @@ describe('checkPreconditions', () => {
     expect(() => checkPreconditions('main', exec(over))).toThrow(PreconditionError);
     expect(() => checkPreconditions('main', exec(over))).toThrow(message);
   });
+
+  it('with flakes on, requires .chreode/ to be gitignored', () => {
+    const ignored = exec({ 'git check-ignore -q .chreode/flakes.jsonl': '' });
+    expect(checkPreconditions('main', ignored, { flakes: true }).branch).toBe('feature');
+    const tracked = exec({ 'git check-ignore -q .chreode/flakes.jsonl': new Error('exit 1') });
+    expect(() => checkPreconditions('main', tracked, { flakes: true })).toThrow(
+      'add the line `.chreode/` to .gitignore'
+    );
+  });
 });

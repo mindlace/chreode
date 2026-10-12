@@ -1,6 +1,11 @@
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fakeExec, type Response } from '../../test/support/fake-exec.js';
 import type { ResolvedConfig } from '../config/types.js';
+import type { FlakeIssue, FlakeLedgerDeps } from '../flakes/ledger.js';
+import { appendFlakeEvent, readFlakeEvents, type FlakeEvent } from '../flakes/log.js';
 import type { MachineLock } from '../lock/machine-lock.js';
 import { StepFailure, type StepOutcome } from '../run/step.js';
 import { runSignoff, type SignoffDeps, type SignoffOptions } from './run.js';
@@ -103,7 +108,121 @@ function harness(
   return { events, errors, calls, deps };
 }
 
+const FLAKY_CONFIG: ResolvedConfig = {
+  ...CONFIG,
+  flakes: { threshold: 3, snoozeLabel: 'flake-snoozed', playbookUrl: 'https://example.com/f.md' }
+};
+const IGNORED: Record<string, Response> = { 'git check-ignore -q .chreode/flakes.jsonl': '' };
+const EVENT: FlakeEvent = {
+  kind: 'unit',
+  runner: 'vitest',
+  project: '',
+  file: 'src/x.spec.ts',
+  title: 'x',
+  firstAttemptError: 'boom',
+  at: '2026-10-11T00:00:00.000Z'
+};
+const TITLE = 'flake(unit): src/x.spec.ts › x';
+
+function fakeLedger(
+  events: string[],
+  opts: { open?: FlakeIssue[]; prior?: number; fail?: boolean }
+): FlakeLedgerDeps {
+  return {
+    listOpenFlakeIssues: () => {
+      if (opts.fail) throw new Error('HTTP 502');
+      return opts.open ?? [];
+    },
+    countOccurrenceComments: () => opts.prior ?? 0,
+    createIssue: (title) => {
+      events.push(`file ${title}`);
+      return { number: 7, title, url: 'https://gh/i/7', labels: ['flake'] };
+    },
+    commentIssue: (n) => void events.push(`comment ${n}`)
+  };
+}
+
+/** A harness whose step records one flake before it passes (or fails). */
+function flaky(
+  ledger: { open?: FlakeIssue[]; prior?: number; fail?: boolean } = {},
+  failStep = false
+) {
+  const h = harness(IGNORED, failStep);
+  const flakeLog = join(mkdtempSync(join(tmpdir(), 'chreode-run-')), 'flakes.jsonl');
+  const runStep = h.deps.runStep!;
+  h.deps.runStep = async (s) => {
+    appendFlakeEvent(EVENT, flakeLog);
+    return runStep(s);
+  };
+  h.deps.flakeLog = flakeLog;
+  h.deps.ledger = fakeLedger(h.events, ledger);
+  return { ...h, flakeLog };
+}
+
 describe('runSignoff', () => {
+  describe('flakes', () => {
+    it('files a flake seen by a passing run, clears the log, and signs off', async () => {
+      const h = flaky();
+      expect(await runSignoff(load(FLAKY_CONFIG), OPTS, h.deps)).toBe(0);
+      expect(h.events).toEqual([
+        'acquire',
+        'run lint',
+        'release',
+        `file ${TITLE}`,
+        'push',
+        'status h signed off by me@example.com',
+        'note h ["lint"]'
+      ]);
+      expect(existsSync(h.flakeLog)).toBe(false);
+    });
+
+    it('still reports a flake when a step fails', async () => {
+      const h = flaky({}, true);
+      expect(await runSignoff(load(FLAKY_CONFIG), OPTS, h.deps)).toBe(1);
+      expect(h.events).toEqual(['acquire', 'run lint', 'release', `file ${TITLE}`]);
+    });
+
+    it('fails an otherwise passing run on escalation, names the issue, posts nothing', async () => {
+      const open = [{ number: 42, title: TITLE, url: 'https://gh/i/42', labels: ['flake'] }];
+      const h = flaky({ open, prior: 1 });
+      expect(await runSignoff(load(FLAKY_CONFIG), OPTS, h.deps)).toBe(1);
+      expect(h.events).toEqual(['acquire', 'run lint', 'release', 'comment 42']);
+      expect(h.errors.join('\n')).toContain('https://gh/i/42');
+    });
+
+    it('a GitHub failure warns, keeps the log, and still signs off', async () => {
+      const h = flaky({ fail: true });
+      const warnings: string[] = [];
+      h.deps.warn = (m) => void warnings.push(m);
+      expect(await runSignoff(load(FLAKY_CONFIG), OPTS, h.deps)).toBe(0);
+      expect(readFlakeEvents(h.flakeLog)).toHaveLength(1);
+      expect(warnings).not.toHaveLength(0);
+      expect(h.events).toContain('push');
+    });
+
+    it('without a flakes block, leaves the log alone', async () => {
+      const h = flaky();
+      expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(0);
+      expect(readFlakeEvents(h.flakeLog)).toHaveLength(1);
+      expect(h.events.some((e) => e.startsWith('file'))).toBe(false);
+    });
+
+    it('a dry run never reaches the ledger', async () => {
+      const h = flaky();
+      appendFlakeEvent(EVENT, h.flakeLog);
+      expect(await runSignoff(load(FLAKY_CONFIG), { ...OPTS, dryRun: true }, h.deps)).toBe(0);
+      expect(h.events).toEqual([]);
+      expect(readFlakeEvents(h.flakeLog)).toHaveLength(1);
+    });
+
+    it('refuses to start when .chreode/ is not gitignored', async () => {
+      const h = harness({ 'git check-ignore -q .chreode/flakes.jsonl': new Error('exit 1') });
+      expect(await runSignoff(load(FLAKY_CONFIG), OPTS, h.deps)).toBe(1);
+      expect(h.errors.join('\n')).toContain('.gitignore');
+      expect(h.events).toEqual([]);
+    });
+  });
+
   it('runs the plan under the lock, then pushes, posts and notes', async () => {
     const h = harness();
     expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(0);
