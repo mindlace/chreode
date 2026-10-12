@@ -58,4 +58,25 @@ describe('reporters against real runners', { timeout: 120_000 }, () => {
     });
     expect(events[0]!.firstAttemptError).toContain('first attempt fails on purpose');
   });
+
+  it('vitest: a test that fails once and then passes is logged', () => {
+    const sb = sandbox();
+    const r = runner('vitest', ['run', '--config', 'test/fixtures/vitest-flake/vitest.config.ts'], {
+      CHREODE_FLAKE_LOG: sb.log,
+      CHREODE_HEAD: 'abc123',
+      FLAKE_MARKER: sb.marker
+    });
+    expect(r.status, r.out).toBe(0);
+    const events = readFlakeEvents(sb.log);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'smoke',
+      runner: 'vitest',
+      project: 'smoke',
+      file: 'test/fixtures/vitest-flake/flaky.fixture.ts',
+      title: 'smoke › fails once, then passes',
+      sha: 'abc123'
+    });
+    expect(events[0]!.firstAttemptError).toContain('first attempt fails on purpose');
+  });
 });

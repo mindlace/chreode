@@ -41,6 +41,10 @@
     "./reporters/playwright": {
       "types": "./dist/reporters/playwright.d.ts",
       "default": "./dist/reporters/playwright.js"
+    },
+    "./reporters/vitest": {
+      "types": "./dist/reporters/vitest.d.ts",
+      "default": "./dist/reporters/vitest.js"
     }
   },
   "scripts": {
