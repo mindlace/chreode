@@ -10,7 +10,7 @@ import { mergeBaseBranch } from '../git/merge.js';
 import { repoInfo, type RepoInfo } from '../github/status.js';
 import { signoffLock, type MachineLock } from '../lock/machine-lock.js';
 import { defaultExec, defaultRun, type Exec, type Run } from '../run/exec.js';
-import { StepFailure, runStep, runSteps } from '../run/step.js';
+import { StepFailure, runStep, runSteps, type StepOutcome } from '../run/step.js';
 import { PlanError, describeSkip, planSignoff, type Plan, type PlannedStep } from './plan.js';
 import { PreconditionError, checkPreconditions, type Preconditions } from './preconditions.js';
 import { defaultTailEffects, runTail, type TailEffects } from './tail.js';
@@ -29,7 +29,7 @@ export interface SignoffDeps {
   exec: Exec;
   run: Run;
   lock: MachineLock;
-  runStep: (step: PlannedStep) => Promise<void>;
+  runStep: (step: PlannedStep) => Promise<StepOutcome>;
   tail: TailEffects;
   log: (m: string) => void;
   warn: (m: string) => void;
@@ -190,8 +190,9 @@ export async function runSignoff(
   }
 
   // 5. Run
+  let allowedStderr: string[];
   try {
-    await runSteps(plan.steps, d.lock, d.runStep);
+    allowedStderr = await runSteps(plan.steps, d.lock, d.runStep);
   } catch (err) {
     if (!(err instanceof StepFailure)) d.error(`[chreode] ${message(err)}`);
     return 1;
@@ -216,6 +217,8 @@ export async function runSignoff(
         noPush: opts.noPush,
         ranLabels: plan.steps.map((s) => s.label),
         skippedByFlag: plan.skippedByFlag,
+        allowedStderr,
+        baseFlag: opts.base,
         context: config.statusContext
       },
       d.tail,

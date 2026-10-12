@@ -3,12 +3,29 @@ import { defaultExec, type Exec } from '../run/exec.js';
 /** GitHub rejects longer descriptions with a 422; truncate rather than fail the post. */
 export const STATUS_DESCRIPTION_MAX = 140;
 
-/** Honest about --skip, so a skipped required step cannot wear the same green as a full run. */
-export function statusDescription(signer: string, skipped: readonly string[]): string {
+/** What made a run less than a full signoff; every part is named in the status. */
+export interface Disclosure {
+  /** Steps dropped by --skip. */
+  skipped?: readonly string[];
+  /** Policed steps that passed only because --allow-stderr waived their stderr. */
+  allowedStderr?: readonly string[];
+  /** The --base ref, when the diff did not start from the last signoff. */
+  base?: string | null;
+}
+
+/** Honest about --skip, --allow-stderr and --base, so a partial run cannot wear the same
+ *  green as a full one. */
+export function statusDescription(signer: string, disclosure: Disclosure): string {
+  const { skipped = [], allowedStderr = [], base = null } = disclosure;
+  const parts = [
+    ...(skipped.length > 0 ? [`skipped: ${skipped.join(', ')}`] : []),
+    ...(allowedStderr.length > 0 ? [`allowed stderr: ${allowedStderr.join(', ')}`] : []),
+    ...(base !== null ? [`base=${base}`] : [])
+  ];
   const desc =
-    skipped.length === 0
+    parts.length === 0
       ? `signed off by ${signer}`
-      : `signed off by ${signer} (skipped: ${skipped.join(', ')})`;
+      : `signed off by ${signer} (${parts.join('; ')})`;
   if (desc.length <= STATUS_DESCRIPTION_MAX) return desc;
   return `${desc.slice(0, STATUS_DESCRIPTION_MAX - 3)}...`;
 }

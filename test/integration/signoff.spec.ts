@@ -181,6 +181,22 @@ describe('chreode signoff, end to end', { timeout: 60_000 }, () => {
     expect(note(sb, head)).toBe('format');
   });
 
+  it('a --skip run is not a base: the next signoff re-plans the skipped step', () => {
+    const skipped = commit(sb.work, 'src/b.ts', 'export const b = 2;\n', 'feat: b');
+    const partial = signoff(sb, ['--skip', 'unit']);
+    expect(partial.status, partial.out).toBe(0);
+    expect(ran(sb)).toEqual(['lint']);
+    expect(statusPosts(sb).at(-1)).toContain('(skipped: unit)');
+    expect(note(sb, skipped)).toBeNull();
+    clearRan(sb);
+    const head = commit(sb.work, 'docs/guide.md', '# Guide\n\nMore.\n', 'docs: more');
+    const r = signoff(sb);
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).not.toContain(`base=${skipped}`);
+    expect(ran(sb)).toEqual(['lint', 'unit']);
+    expect(note(sb, head)).toBe('lint unit');
+  });
+
   it('a failing step exits 1, posts nothing, notes nothing, pushes nothing', () => {
     const head = commit(sb.work, 'src/b.ts', 'export const b = 2;\n', 'feat: b');
     const r = signoff(sb, [], { FAIL_STEP: 'lint' });

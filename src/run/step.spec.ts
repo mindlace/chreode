@@ -108,7 +108,7 @@ describe('runStep', () => {
     const runImpl = async () => result({ stderr: 'noise' });
     await expect(
       runStep(step(), { allowStderr: false, allowlist: [], runImpl, ...quiet })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('passed');
   });
 
   it('a policed clean exit with unexpected stderr fails', async () => {
@@ -126,14 +126,22 @@ describe('runStep', () => {
   it('--allow-stderr downgrades unexpected stderr to a warning', async () => {
     const runImpl = async () => result({ stderr: 'Error: boom' });
     const errors: string[] = [];
-    await runStep(step({ policeStderr: true }), {
+    const outcome = await runStep(step({ policeStderr: true }), {
       allowStderr: true,
       allowlist: [],
       runImpl,
       ...quiet,
       error: (m) => errors.push(m)
     });
+    expect(outcome).toBe('allowed-stderr');
     expect(errors.join('\n')).toContain('allowed by --allow-stderr');
+  });
+
+  it('--allow-stderr with clean stderr is an ordinary pass', async () => {
+    const runImpl = async () => result({});
+    await expect(
+      runStep(step({ policeStderr: true }), { allowStderr: true, allowlist: [], runImpl, ...quiet })
+    ).resolves.toBe('passed');
   });
 
   it('allowlisted stderr passes', async () => {
@@ -145,7 +153,7 @@ describe('runStep', () => {
         runImpl,
         ...quiet
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('passed');
   });
 
   it('every step child gets CHREODE_SIGNOFF=1, keeping the caller env', async () => {
@@ -186,7 +194,7 @@ describe('runSteps', () => {
 
   it('an empty plan touches no lock', async () => {
     const events: string[] = [];
-    await runSteps([], lock(events), async () => {});
+    expect(await runSteps([], lock(events), async () => 'passed')).toEqual([]);
     expect(events).toEqual([]);
   });
 
@@ -194,8 +202,17 @@ describe('runSteps', () => {
     const events: string[] = [];
     await runSteps([step({ label: 'a' }), step({ label: 'b' })], lock(events), async (s) => {
       events.push(s.label);
+      return 'passed';
     });
     expect(events).toEqual(['acquire', 'a', 'b', 'release']);
+  });
+
+  it('returns the labels whose stderr --allow-stderr let pass', async () => {
+    const steps = [step({ label: 'a' }), step({ label: 'b' }), step({ label: 'c' })];
+    const allowed = await runSteps(steps, lock([]), async (s) =>
+      s.label === 'b' ? 'allowed-stderr' : 'passed'
+    );
+    expect(allowed).toEqual(['b']);
   });
 
   it('releases the lock and stops at the first failure', async () => {
@@ -203,6 +220,7 @@ describe('runSteps', () => {
     const run = async (s: PlannedStep) => {
       events.push(s.label);
       if (s.label === 'a') throw new StepFailure('a', 'failed');
+      return 'passed' as const;
     };
     await expect(
       runSteps([step({ label: 'a' }), step({ label: 'b' })], lock(events), run)

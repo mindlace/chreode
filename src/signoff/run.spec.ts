@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fakeExec, type Response } from '../../test/support/fake-exec.js';
 import type { ResolvedConfig } from '../config/types.js';
 import type { MachineLock } from '../lock/machine-lock.js';
-import { StepFailure } from '../run/step.js';
+import { StepFailure, type StepOutcome } from '../run/step.js';
 import { runSignoff, type SignoffDeps, type SignoffOptions } from './run.js';
 import type { TailEffects } from './tail.js';
 
@@ -34,7 +34,7 @@ const OPTS: SignoffOptions = {
   noMerge: true,
   noPush: false,
   allowStderr: false,
-  base: 'b',
+  base: null,
   skip: []
 };
 
@@ -46,6 +46,8 @@ function scripted(over: Record<string, Response> = {}) {
     'gh auth status': '',
     'git config user.email': 'me@example.com\n',
     'git rev-parse HEAD': 'h\n',
+    'git rev-list --topo-order HEAD ^origin/main': '',
+    'git merge-base HEAD origin/main': 'b\n',
     'git rev-parse --verify b^{commit}': 'b\n',
     'git rev-parse --verify h^{commit}': 'h\n',
     'git rev-parse --path-format=absolute --git-dir --git-common-dir': '/r/.git\n/r/.git\n',
@@ -54,7 +56,11 @@ function scripted(over: Record<string, Response> = {}) {
   });
 }
 
-function harness(over: Record<string, Response> = {}, failStep = false) {
+function harness(
+  over: Record<string, Response> = {},
+  failStep = false,
+  outcome: StepOutcome = 'passed'
+) {
   const events: string[] = [];
   const errors: string[] = [];
   const { exec, calls } = scripted(over);
@@ -78,6 +84,7 @@ function harness(over: Record<string, Response> = {}, failStep = false) {
     runStep: async (s) => {
       events.push(`run ${s.label}`);
       if (failStep) throw new StepFailure(s.label, 'failed');
+      return outcome;
     },
     log: () => {},
     warn: () => {},
@@ -173,5 +180,37 @@ describe('runSignoff', () => {
     expect(await runSignoff(config, { ...OPTS, noMerge: false }, h.deps)).toBe(1);
     expect(h.events).toEqual([]);
     expect(h.errors.join('\n')).toContain('afterMerge');
+  });
+
+  describe('a partial run posts but writes no note', () => {
+    it('--skip', async () => {
+      const h = harness();
+      expect(await runSignoff(CONFIG, { ...OPTS, skip: ['lint'] }, h.deps)).toBe(0);
+      expect(h.events).toEqual(['push', 'status h signed off by me@example.com (skipped: lint)']);
+    });
+
+    it('--base', async () => {
+      const h = harness();
+      expect(await runSignoff(CONFIG, { ...OPTS, base: 'b' }, h.deps)).toBe(0);
+      expect(h.events).toEqual([
+        'acquire',
+        'run lint',
+        'release',
+        'push',
+        'status h signed off by me@example.com (base=b)'
+      ]);
+    });
+
+    it('--allow-stderr that let a step pass', async () => {
+      const h = harness({}, false, 'allowed-stderr');
+      expect(await runSignoff(CONFIG, { ...OPTS, allowStderr: true }, h.deps)).toBe(0);
+      expect(h.events).toEqual([
+        'acquire',
+        'run lint',
+        'release',
+        'push',
+        'status h signed off by me@example.com (allowed stderr: lint)'
+      ]);
+    });
   });
 });

@@ -152,9 +152,13 @@ export interface StepRunOptions {
   runImpl?: (cmd: string, timeoutMs: number, opts: RunOptions) => Promise<RunResult>;
 }
 
+/** How a step passed: 'allowed-stderr' means it would have failed stderr policing but for
+ *  --allow-stderr, which makes the run partial. */
+export type StepOutcome = 'passed' | 'allowed-stderr';
+
 /** Run one planned step. Every failure throws StepFailure so the caller's `finally`
  *  releases the lock before the run exits. */
-export async function runStep(step: PlannedStep, opts: StepRunOptions): Promise<void> {
+export async function runStep(step: PlannedStep, opts: StepRunOptions): Promise<StepOutcome> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const error = opts.error ?? ((m: string) => console.error(m));
   const writeStderr = opts.writeStderr ?? ((s: string) => void process.stderr.write(s));
@@ -181,7 +185,7 @@ export async function runStep(step: PlannedStep, opts: StepRunOptions): Promise<
       error(`\n[chreode] FAILED at: ${step.label} (exit ${r.code})`);
       throw new StepFailure(step.label, `${step.label} failed`);
     }
-    return;
+    return 'passed';
   }
 
   const outcome = decidePolicedOutcome({ code: r.code, stderr: r.stderr }, opts.allowlist);
@@ -194,7 +198,7 @@ export async function runStep(step: PlannedStep, opts: StepRunOptions): Promise<
     if (opts.allowStderr) {
       error(`\n[chreode] ${step.label} wrote unexpected stderr, allowed by --allow-stderr:`);
       for (const line of outcome.offendingLines) writeStderr(`${line}\n`);
-      return;
+      return 'allowed-stderr';
     }
     error(
       `\n[chreode] FAILED at: ${step.label}: it exited 0 but wrote unexpected stderr.\n` +
@@ -206,19 +210,24 @@ export async function runStep(step: PlannedStep, opts: StepRunOptions): Promise<
     for (const line of outcome.offendingLines) writeStderr(`${line}\n`);
     throw new StepFailure(step.label, `${step.label} wrote unexpected stderr`);
   }
+  return 'passed';
 }
 
 /** Run the plan holding the machine lock; an empty plan touches no lock. The lock is
- *  released on every exit path. */
+ *  released on every exit path. Returns the labels whose stderr --allow-stderr waived. */
 export async function runSteps(
   steps: readonly PlannedStep[],
   lock: MachineLock,
-  run: (step: PlannedStep) => Promise<void>
-): Promise<void> {
-  if (steps.length === 0) return;
+  run: (step: PlannedStep) => Promise<StepOutcome>
+): Promise<string[]> {
+  if (steps.length === 0) return [];
   const release = await lock.acquire();
+  const allowed: string[] = [];
   try {
-    for (const step of steps) await run(step);
+    for (const step of steps) {
+      if ((await run(step)) === 'allowed-stderr') allowed.push(step.label);
+    }
+    return allowed;
   } finally {
     await release();
   }

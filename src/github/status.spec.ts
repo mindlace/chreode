@@ -4,20 +4,30 @@ import { parseRepo, prUrl, repoInfo, statusArgs, statusDescription } from './sta
 
 describe('statusDescription', () => {
   it('names the signer', () => {
-    expect(statusDescription('me@example.com', [])).toBe('signed off by me@example.com');
+    expect(statusDescription('me@example.com', {})).toBe('signed off by me@example.com');
   });
 
   it('is honest about --skip', () => {
-    expect(statusDescription('me@example.com', ['test:e2e', 'lint'])).toBe(
+    expect(statusDescription('me@example.com', { skipped: ['test:e2e', 'lint'] })).toBe(
       'signed off by me@example.com (skipped: test:e2e, lint)'
     );
   });
 
+  it('discloses allowed stderr and an explicit --base', () => {
+    expect(
+      statusDescription('me@example.com', {
+        skipped: ['e2e'],
+        allowedStderr: ['unit'],
+        base: 'HEAD~2'
+      })
+    ).toBe('signed off by me@example.com (skipped: e2e; allowed stderr: unit; base=HEAD~2)');
+  });
+
   it('never exceeds GitHub’s 140-character cap', () => {
-    const desc = statusDescription(
-      'me@example.com',
-      Array.from({ length: 30 }, (_, i) => `step-${i}`)
-    );
+    const desc = statusDescription('me@example.com', {
+      skipped: Array.from({ length: 30 }, (_, i) => `step-${i}`),
+      base: 'main'
+    });
     expect(desc).toHaveLength(140);
     expect(desc.endsWith('...')).toBe(true);
   });
