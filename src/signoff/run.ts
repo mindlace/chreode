@@ -1,4 +1,9 @@
+import { resolve } from 'node:path';
 import type { ResolvedConfig } from '../config/types.js';
+import { ghLedgerDeps } from '../flakes/gh.js';
+import type { FlakeLedgerDeps } from '../flakes/ledger.js';
+import { FLAKE_LOG_FILE } from '../flakes/log.js';
+import { escalationFailure, runFlakePhase } from '../flakes/phase.js';
 import {
   committedPaths,
   isWorktree,
@@ -31,14 +36,22 @@ export interface SignoffDeps {
   lock: MachineLock;
   runStep: (step: PlannedStep) => Promise<StepOutcome>;
   tail: TailEffects;
+  /** Files, bumps and lists flake issues. */
+  ledger: FlakeLedgerDeps;
+  /** Absolute path of the flake log; steps see it as CHREODE_FLAKE_LOG. */
+  flakeLog: string;
   log: (m: string) => void;
   warn: (m: string) => void;
   error: (m: string) => void;
 }
 
-function defaultDeps(config: ResolvedConfig, opts: SignoffOptions): SignoffDeps {
+function defaultDeps(
+  config: ResolvedConfig,
+  opts: SignoffOptions,
+  stepEnv: NodeJS.ProcessEnv = {}
+): SignoffDeps {
   // Children can detect the gate (e.g. to quiet build-tool stderr) via CHREODE_SIGNOFF=1.
-  const env = { ...process.env, CHREODE_SIGNOFF: '1' };
+  const env = { ...process.env, CHREODE_SIGNOFF: '1', ...stepEnv };
   let repo: RepoInfo | null = null;
   const getRepo = () => (repo ??= repoInfo(defaultExec));
   return {
@@ -48,6 +61,9 @@ function defaultDeps(config: ResolvedConfig, opts: SignoffOptions): SignoffDeps 
     runStep: (step) =>
       runStep(step, { allowStderr: opts.allowStderr, allowlist: config.stderrAllowlist, env }),
     tail: defaultTailEffects(getRepo, config.statusContext),
+    ledger: ghLedgerDeps(defaultExec),
+    // The CLI has already chdir'd to the repo root.
+    flakeLog: resolve(FLAKE_LOG_FILE),
     log: (m) => console.log(m),
     warn: (m) => console.warn(m),
     error: (m) => console.error(m)
@@ -101,7 +117,7 @@ export async function runSignoff(
   // 1. Preconditions
   let pre: Preconditions;
   try {
-    pre = checkPreconditions(baseBranch, d.exec);
+    pre = checkPreconditions(baseBranch, d.exec, { flakes: config.flakes !== null });
   } catch (err) {
     if (err instanceof PreconditionError) {
       d.error(`[chreode] ${err.message}`);
@@ -205,14 +221,39 @@ export async function runSignoff(
     return 0;
   }
 
-  // 5. Run
-  let allowedStderr: string[];
+  // 5. Run. Steps learn the sha under test and where reporters record flakes.
+  d = {
+    ...defaultDeps(config, opts, { CHREODE_HEAD: head, CHREODE_FLAKE_LOG: d.flakeLog }),
+    ...overrides
+  };
+  let allowedStderr: string[] = [];
+  let stepsFailed = false;
   try {
     allowedStderr = await runSteps(plan.steps, d.lock, d.runStep);
   } catch (err) {
     if (!(err instanceof StepFailure)) d.error(`[chreode] ${message(err)}`);
-    return 1;
+    stepsFailed = true;
   }
+
+  // 6. Flakes: after the steps, passed or failed, so a flake is charged to the run that saw
+  //    it. Network, not machine load: the lock is already released.
+  let escalated = false;
+  if (config.flakes !== null) {
+    const outcome = runFlakePhase({
+      logPath: d.flakeLog,
+      ctx: { branch: pre.branch, sha: head },
+      config: config.flakes,
+      ledger: d.ledger,
+      log: d.log,
+      warn: d.warn
+    });
+    const failure = escalationFailure(outcome, config.flakes);
+    if (failure !== undefined) {
+      d.error(failure);
+      escalated = true;
+    }
+  }
+  if (stepsFailed || escalated) return 1;
 
   // What was tested must be exactly HEAD.
   const changed = checkoutChange(head, d.exec);
@@ -224,7 +265,7 @@ export async function runSignoff(
     return 1;
   }
 
-  // 6. Tail
+  // 7. Tail
   try {
     runTail(
       {

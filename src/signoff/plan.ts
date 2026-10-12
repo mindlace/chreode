@@ -55,10 +55,13 @@ function tester(m: Matcher): (path: string) => boolean {
   };
 }
 
+export function matchesAny(path: string, matchers: Matcher | Matcher[]): boolean {
+  return (Array.isArray(matchers) ? matchers : [matchers]).some((m) => tester(m)(path));
+}
+
 export function matchRule(path: string, rules: readonly RuleConfig[]): RuleConfig | null {
   for (const rule of rules) {
-    const matchers = Array.isArray(rule.match) ? rule.match : [rule.match];
-    if (matchers.some((m) => tester(m)(path))) return rule;
+    if (matchesAny(path, rule.match)) return rule;
   }
   return null;
 }

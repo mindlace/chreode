@@ -46,6 +46,44 @@ export interface ProtectionConfig {
   repo?: Record<string, unknown>;
 }
 
+/** Presence turns flake tracking on: retried-then-passed tests become GitHub issues. */
+export interface FlakesConfig {
+  /** Occurrences (the issue itself counts as one) at which an unsnoozed flake fails signoff. */
+  threshold?: number;
+  /** An issue carrying this label never escalates. */
+  snoozeLabel?: string;
+  /** Linked from every filed issue. */
+  playbookUrl?: string;
+}
+
+export interface BurnInRunner {
+  /** For output. */
+  name: string;
+  match: Matcher | Matcher[];
+  ignore?: Matcher | Matcher[];
+  /** A string runs once; an array runs each in sequence (for runners with no repeat flag). */
+  command: (files: string[], repeats: number) => string | string[];
+}
+
+export interface BurnInConfig {
+  repeats?: number;
+  /** Changed test files beyond this many are listed as skipped, never silently dropped. */
+  maxFiles?: number;
+  runners: BurnInRunner[];
+}
+
+export interface ResolvedFlakes {
+  threshold: number;
+  snoozeLabel: string;
+  playbookUrl: string;
+}
+
+export interface ResolvedBurnIn {
+  repeats: number;
+  maxFiles: number;
+  runners: BurnInRunner[];
+}
+
 export interface ChreodeConfig {
   baseBranch?: string;
   statusContext?: string;
@@ -55,6 +93,8 @@ export interface ChreodeConfig {
   afterMerge?: string;
   stderrAllowlist?: AllowlistEntry[];
   protection?: ProtectionConfig;
+  flakes?: FlakesConfig;
+  burnIn?: BurnInConfig;
 }
 
 export interface ResolvedStep extends StepConfig {
@@ -71,11 +111,26 @@ export interface ResolvedConfig {
   afterMerge: string | null;
   stderrAllowlist: AllowlistEntry[];
   protection: ProtectionConfig;
+  flakes: ResolvedFlakes | null;
+  burnIn: ResolvedBurnIn | null;
 }
 
 export const DEFAULT_BASE_BRANCH = 'main';
 export const DEFAULT_STATUS_CONTEXT = 'chreode/signoff';
 export const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_FLAKE_THRESHOLD = 3;
+export const DEFAULT_SNOOZE_LABEL = 'flake-snoozed';
+export const DEFAULT_PLAYBOOK_URL = 'https://github.com/mindlace/chreode/blob/main/docs/flakes.md';
+export const DEFAULT_BURN_IN_REPEATS = 5;
+export const DEFAULT_BURN_IN_MAX_FILES = 12;
+
+export function resolveFlakes(config: FlakesConfig): ResolvedFlakes {
+  return {
+    threshold: config.threshold ?? DEFAULT_FLAKE_THRESHOLD,
+    snoozeLabel: config.snoozeLabel ?? DEFAULT_SNOOZE_LABEL,
+    playbookUrl: config.playbookUrl ?? DEFAULT_PLAYBOOK_URL
+  };
+}
 
 /** Identity helper so `chreode.config.ts` gets types. */
 export function defineConfig(config: ChreodeConfig): ChreodeConfig {

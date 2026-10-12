@@ -44,6 +44,8 @@ Add `chreode.config.ts` at the repo root (see below), then:
 npx chreode signoff            # merge origin/main, run what changed, push, post the status
 npx chreode signoff --dry-run  # merge, then print the plan and stop
 npx chreode protect            # require the status on main (idempotent); --dry-run previews
+npx chreode flake-report       # report logged flakes to GitHub issues (signoff does this itself)
+npx chreode burn-in --base <sha> --head <sha>  # run changed test files N times, retries off
 ```
 
 Wire them into `package.json` as `"signoff": "chreode signoff"` and
@@ -94,6 +96,96 @@ enforced, linear history, PRs required (0 approvals, stale reviews dismissed), a
 the repo to squash-only merges that delete head branches. Override either payload under
 `protection` in the config. `--repo owner/name` targets another repo; `--dry-run` prints the
 payloads.
+
+## Flakes
+
+A test that fails and then passes on retry is a flake, and a flake is a bug. chreode records
+each one, files it as a GitHub issue, and fails signoff when the same flake keeps coming back.
+The doctrine and the fix playbook are in [docs/flakes.md](docs/flakes.md).
+
+**1. Record.** Give your runners at least one retry locally and register the reporters. They record only
+tests that pass on a retry, so with retries off nothing is recorded. Both take
+`{ kind?, projects? }`: `kind` (a string, or `(project) => string`) is the issue-title bucket
+(default `'e2e'` for Playwright, the project name or `'unit'` for vitest); `projects` limits
+recording to those runner projects.
+
+```ts
+// playwright.config.ts
+export default defineConfig({
+  retries: 1,
+  use: { trace: 'retain-on-failure' }, // 'on-first-retry' records no trace of the failed attempt
+  reporter: [['list'], ['@mindlace/chreode/reporters/playwright']]
+});
+```
+
+```ts
+// vitest.config.ts (reporters are root-level only)
+import VitestFlakeReporter from '@mindlace/chreode/reporters/vitest';
+
+export default defineConfig({
+  test: { retry: 1, reporters: ['default', new VitestFlakeReporter()] }
+});
+```
+
+Events go to `.chreode/flakes.jsonl` (signoff tells each step the absolute path in
+`CHREODE_FLAKE_LOG`, and the sha under test in `CHREODE_HEAD`). Add `.chreode/` to
+`.gitignore`; when `flakes` is configured, signoff refuses to run otherwise. Registering the
+reporters without a `flakes` block just accumulates events in `.chreode/flakes.jsonl`, unreported.
+Filed issues carry the Playwright trace's local path, valid until the next Playwright run wipes
+`test-results/`, not the trace itself. `playwright` and `vitest` are optional peer
+dependencies: the reporters import only their types.
+
+**2. Ledger.** Add `flakes: {}` to the config. After the steps, pass or fail, signoff gives
+each flaking test one open issue labelled `flake` (the label is created if missing) and adds an
+occurrence comment each time it recurs. At `threshold` occurrences (default 3) signoff fails,
+any run that sees that flake again fails, listing the issue URLs in its failure output (no
+commit status is posted), until the flake is fixed or its issue is labelled `snoozeLabel`
+(default `flake-snoozed`). A run that sees no flake events is silent. A GitHub error is a
+warning: the events not yet recorded stay in the log for the next run.
+`chreode flake-report` runs the same report outside signoff and exits 1 on escalation.
+
+**3. Burn-in.** `burnInStep({ when, timeoutMs? })` adds a step that runs every test file changed since the base
+`repeats` times with retries off, so a new flake fails before it lands rather than after three
+victims. Pass your test steps' triggers as `when`, and place it after them. Its stderr is policed like a
+test step's, so it needs the same `stderrAllowlist` entries:
+
+```ts
+import { burnInStep, defineConfig } from '@mindlace/chreode';
+
+export default defineConfig({
+  steps: [
+    { label: 'test:unit', run: 'npm run test:unit', when: ['unit'], policeStderr: true },
+    { label: 'test:e2e', run: 'npm run test:e2e', when: ['e2e'], policeStderr: true },
+    burnInStep({ when: ['unit', 'e2e'] }) // timeoutMs defaults to 10 minutes
+  ],
+  flakes: {}, // threshold: 3, snoozeLabel: 'flake-snoozed', playbookUrl: chreode's docs/flakes.md on GitHub
+  burnIn: {
+    repeats: 5, // default
+    maxFiles: 12, // default; the overflow is listed, never silently dropped
+    runners: [
+      {
+        name: 'e2e',
+        match: 'e2e/**/*.spec.ts',
+        ignore: 'e2e/helpers/**',
+        // Pin a project: --repeat-each multiplies across every project otherwise.
+        command: (files, n) =>
+          `npx playwright test --project chromium --repeat-each=${n} --retries=0 ${files.join(' ')}`
+      },
+      {
+        name: 'unit',
+        match: 'src/**/*.spec.ts',
+        // vitest has no --repeat-each: return one invocation per repeat.
+        command: (files, n) =>
+          Array.from({ length: n }, () => `npx vitest --run --retry=0 ${files.join(' ')}`)
+      }
+    ]
+  }
+});
+```
+
+A changed file goes to the first runner that matches it and does not `ignore` it; files no
+runner takes are not burned in, and deleted files never are. Commands run from the repo root
+with inherited output; the first failure fails the step and names the files and the command.
 
 ## Config reference
 
@@ -148,6 +240,10 @@ leave the checkout clean (signoff refuses to run otherwise), so use `npm ci`, wh
 exactly the lockfile, rather than `npm install`, which can rewrite it.
 **`stderrAllowlist`** entries need a `reason`: allowlisting noise is a reviewed decision.
 Unknown keys, duplicate labels, and `supersededBy` naming a missing step are load errors.
+
+**`flakes`** (presence turns flake tracking on) and **`burnIn`** are described under
+[Flakes](#flakes). `threshold`, `repeats` and `maxFiles` must be positive integers, and
+`burnIn.runners` must be non-empty.
 
 ## License
 

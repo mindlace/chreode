@@ -11,7 +11,9 @@ const base: ResolvedConfig = {
   steps: [],
   afterMerge: null,
   stderrAllowlist: [],
-  protection: {}
+  protection: {},
+  flakes: null,
+  burnIn: null
 };
 
 describe('protectionPayloads', () => {

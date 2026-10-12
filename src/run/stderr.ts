@@ -4,6 +4,10 @@ import type { AllowlistEntry } from '../config/types.js';
 // runtime so no control character appears in source (keeps no-control-regex quiet).
 const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
+export function stripAnsi(s: string): string {
+  return s.replace(ANSI_SGR, '');
+}
+
 /** Classify captured stderr line by line: blank and allowlisted lines are benign,
  *  everything else is returned ANSI-stripped. */
 export function policeStderr(
@@ -12,7 +16,7 @@ export function policeStderr(
 ): { offendingLines: string[] } {
   const offendingLines = buffer
     .split(/\r?\n/)
-    .map((line) => line.replace(ANSI_SGR, ''))
+    .map(stripAnsi)
     .filter((line) => line.trim() !== '')
     .filter(
       (line) =>

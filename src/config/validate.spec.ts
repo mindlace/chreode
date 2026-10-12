@@ -22,7 +22,9 @@ describe('validateConfig', () => {
       rules: [],
       afterMerge: null,
       stderrAllowlist: [],
-      protection: {}
+      protection: {},
+      flakes: null,
+      burnIn: null
     });
     expect(config.steps[0]).toMatchObject({
       label: 'lint',
@@ -106,5 +108,79 @@ describe('validateConfig', () => {
 
   it('rejects a non-object config with a hint', () => {
     expect(problems(undefined)[0]).toContain('export default defineConfig');
+  });
+
+  describe('flakes', () => {
+    it('`flakes: {}` turns tracking on with the defaults', () => {
+      expect(validateConfig({ steps: [lint], flakes: {} }).flakes).toEqual({
+        threshold: 3,
+        snoozeLabel: 'flake-snoozed',
+        playbookUrl: 'https://github.com/mindlace/chreode/blob/main/docs/flakes.md'
+      });
+    });
+
+    it('keeps overrides', () => {
+      const flakes = { threshold: 5, snoozeLabel: 'later', playbookUrl: 'https://x.test/p' };
+      expect(validateConfig({ steps: [lint], flakes }).flakes).toEqual(flakes);
+    });
+
+    it('rejects bad values and unknown keys', () => {
+      expect(
+        problems({
+          steps: [lint],
+          flakes: { threshold: 2.5, snoozeLabel: '', playbookUrl: 7, treshold: 3 }
+        })
+      ).toEqual([
+        'flakes: unknown key "treshold"',
+        'flakes.threshold: must be a positive integer',
+        'flakes.snoozeLabel: must be a non-empty string',
+        'flakes.playbookUrl: must be a non-empty string'
+      ]);
+      expect(problems({ steps: [lint], flakes: true })).toEqual([
+        'config.flakes: must be an object ({} turns flake tracking on with the defaults)'
+      ]);
+    });
+  });
+
+  describe('burnIn', () => {
+    const runner = { name: 'unit', match: 'src/**/*.spec.ts', command: () => 'vitest' };
+
+    it('fills repeats and maxFiles', () => {
+      const burnIn = validateConfig({ steps: [lint], burnIn: { runners: [runner] } }).burnIn;
+      expect(burnIn).toEqual({ repeats: 5, maxFiles: 12, runners: [runner] });
+    });
+
+    it('requires a non-empty runners array', () => {
+      expect(problems({ steps: [lint], burnIn: { runners: [] } })).toEqual([
+        'burnIn.runners: must be a non-empty array'
+      ]);
+      expect(problems({ steps: [lint], burnIn: {} })).toEqual([
+        'burnIn.runners: must be a non-empty array'
+      ]);
+    });
+
+    it('rejects bad counts, bad runners and unknown keys', () => {
+      expect(
+        problems({
+          steps: [lint],
+          burnIn: {
+            repeats: 0,
+            maxFiles: -1,
+            runner: [],
+            runners: [{ name: '', match: [], ignore: 5, command: 'vitest', when: [] }, 'x']
+          }
+        })
+      ).toEqual([
+        'burnIn: unknown key "runner"',
+        'burnIn.repeats: must be a positive integer',
+        'burnIn.maxFiles: must be a positive integer',
+        'burnIn.runners[0]: unknown key "when"',
+        'burnIn.runners[0].name: must be a non-empty string',
+        'burnIn.runners[0].match: must be a glob string, a RegExp, or a non-empty array of them',
+        'burnIn.runners[0].ignore: must be a glob string, a RegExp, or a non-empty array of them',
+        'burnIn.runners[0].command: must be a function (files, repeats) => string | string[]',
+        'burnIn.runners[1]: must be an object'
+      ]);
+    });
   });
 });

@@ -11,6 +11,8 @@ function config(rules: RuleConfig[], steps: StepSpec[]): ResolvedConfig {
     afterMerge: null,
     stderrAllowlist: [],
     protection: {},
+    flakes: null,
+    burnIn: null,
     rules,
     steps: steps.map((s) => ({
       run: `run ${s.label}`,

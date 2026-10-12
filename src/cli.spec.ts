@@ -8,6 +8,8 @@ import {
   buildProgram,
   isInvokedDirectly,
   resolveSignoffOptions,
+  type BurnInFlags,
+  type FlakeReportFlags,
   type SignoffFlags
 } from './cli.js';
 
@@ -63,7 +65,9 @@ describe('buildProgram', () => {
           seen = flags;
           return 0;
         },
-        protect: async () => 0
+        protect: async () => 0,
+        flakeReport: async () => 0,
+        burnIn: async () => 0
       },
       () => {}
     );
@@ -78,6 +82,41 @@ describe('buildProgram', () => {
       push: true,
       base: 'abc'
     });
+  });
+
+  function trapped(seen: { burnIn?: BurnInFlags; flakeReport?: FlakeReportFlags }) {
+    const p = buildProgram(
+      {
+        signoff: async () => 0,
+        protect: async () => 0,
+        flakeReport: async (flags) => {
+          seen.flakeReport = flags;
+          return 0;
+        },
+        burnIn: async (flags) => {
+          seen.burnIn = flags;
+          return 0;
+        }
+      },
+      () => {}
+    );
+    // Subcommands copy settings at creation, so silence and trap each one directly.
+    for (const c of [p, ...p.commands]) c.exitOverride().configureOutput({ writeErr: () => {} });
+    return p;
+  }
+
+  it('parses burn-in --base/--head and flake-report --config', async () => {
+    const seen: { burnIn?: BurnInFlags; flakeReport?: FlakeReportFlags } = {};
+    await trapped(seen).parseAsync(['burn-in', '--base', 'b', '--head', 'h'], { from: 'user' });
+    await trapped(seen).parseAsync(['flake-report', '--config', 'c.ts'], { from: 'user' });
+    expect(seen.burnIn).toMatchObject({ base: 'b', head: 'h' });
+    expect(seen.flakeReport).toMatchObject({ config: 'c.ts' });
+  });
+
+  it('burn-in requires --head', async () => {
+    await expect(
+      trapped({}).parseAsync(['burn-in', '--base', 'b'], { from: 'user' })
+    ).rejects.toThrow("required option '--head <sha>' not specified");
   });
 });
 
