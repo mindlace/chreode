@@ -12,6 +12,8 @@ const CONFIG: ResolvedConfig = {
   afterMerge: null,
   stderrAllowlist: [],
   protection: {},
+  flakes: null,
+  burnIn: null,
   rules: [
     { match: 'docs/**', triggers: [] },
     { match: 'src/**', triggers: ['lint'] }

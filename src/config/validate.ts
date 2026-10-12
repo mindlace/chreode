@@ -1,10 +1,17 @@
 import {
   DEFAULT_BASE_BRANCH,
+  DEFAULT_BURN_IN_MAX_FILES,
+  DEFAULT_BURN_IN_REPEATS,
   DEFAULT_STATUS_CONTEXT,
   DEFAULT_TIMEOUT_MS,
+  resolveFlakes,
   type AllowlistEntry,
+  type BurnInRunner,
+  type FlakesConfig,
   type ProtectionConfig,
+  type ResolvedBurnIn,
   type ResolvedConfig,
+  type ResolvedFlakes,
   type ResolvedStep,
   type RuleConfig,
   type StepConfig
@@ -24,7 +31,9 @@ const TOP_KEYS = new Set([
   'steps',
   'afterMerge',
   'stderrAllowlist',
-  'protection'
+  'protection',
+  'flakes',
+  'burnIn'
 ]);
 const RULE_KEYS = new Set(['match', 'triggers']);
 const STEP_KEYS = new Set([
@@ -38,6 +47,10 @@ const STEP_KEYS = new Set([
 ]);
 const ALLOW_KEYS = new Set(['pattern', 'reason']);
 const PROTECTION_KEYS = new Set(['branch', 'repo']);
+const FLAKES_KEYS = new Set(['threshold', 'snoozeLabel', 'playbookUrl']);
+const BURN_IN_KEYS = new Set(['repeats', 'maxFiles', 'runners']);
+const RUNNER_KEYS = new Set(['name', 'match', 'ignore', 'command']);
+const MATCHER_PROBLEM = 'must be a glob string, a RegExp, or a non-empty array of them';
 
 /** Cross-realm safe: a config evaluated by jiti may not share this realm's RegExp. */
 export function isRegExp(v: unknown): v is RegExp {
@@ -58,6 +71,14 @@ function isStringArray(v: unknown): v is string[] {
 
 function isMatcher(v: unknown): boolean {
   return isNonEmptyString(v) || isRegExp(v);
+}
+
+function isMatcherList(v: unknown): boolean {
+  return Array.isArray(v) ? v.length > 0 && v.every(isMatcher) : isMatcher(v);
+}
+
+function isPositiveInteger(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0;
 }
 
 function unknownKeys(
@@ -84,13 +105,7 @@ function validateRules(raw: unknown, problems: string[]): RuleConfig[] {
       return;
     }
     unknownKeys(rule, RULE_KEYS, where, problems);
-    const m = rule.match;
-    const ok = Array.isArray(m) ? m.length > 0 && m.every(isMatcher) : isMatcher(m);
-    if (!ok) {
-      problems.push(
-        `${where}.match: must be a glob string, a RegExp, or a non-empty array of them`
-      );
-    }
+    if (!isMatcherList(rule.match)) problems.push(`${where}.match: ${MATCHER_PROBLEM}`);
     if (!Array.isArray(rule.triggers) || !rule.triggers.every(isNonEmptyString)) {
       problems.push(
         `${where}.triggers: must be an array of trigger names ([] means "matched, run nothing")`
@@ -195,6 +210,67 @@ function validateProtection(raw: unknown, problems: string[]): ProtectionConfig 
   return raw as ProtectionConfig;
 }
 
+function validateFlakes(raw: unknown, problems: string[]): ResolvedFlakes | null {
+  if (raw === undefined) return null;
+  if (!isRecord(raw)) {
+    problems.push(
+      'config.flakes: must be an object ({} turns flake tracking on with the defaults)'
+    );
+    return null;
+  }
+  unknownKeys(raw, FLAKES_KEYS, 'flakes', problems);
+  if (raw.threshold !== undefined && !isPositiveInteger(raw.threshold)) {
+    problems.push('flakes.threshold: must be a positive integer');
+  }
+  for (const key of ['snoozeLabel', 'playbookUrl'] as const) {
+    if (raw[key] !== undefined && !isNonEmptyString(raw[key])) {
+      problems.push(`flakes.${key}: must be a non-empty string`);
+    }
+  }
+  return resolveFlakes(raw as FlakesConfig);
+}
+
+function validateBurnIn(raw: unknown, problems: string[]): ResolvedBurnIn | null {
+  if (raw === undefined) return null;
+  if (!isRecord(raw)) {
+    problems.push('config.burnIn: must be an object');
+    return null;
+  }
+  unknownKeys(raw, BURN_IN_KEYS, 'burnIn', problems);
+  for (const key of ['repeats', 'maxFiles'] as const) {
+    if (raw[key] !== undefined && !isPositiveInteger(raw[key])) {
+      problems.push(`burnIn.${key}: must be a positive integer`);
+    }
+  }
+  const runners = raw.runners;
+  if (!Array.isArray(runners) || runners.length === 0) {
+    problems.push('burnIn.runners: must be a non-empty array');
+  } else {
+    runners.forEach((runner: unknown, i) => {
+      const where = `burnIn.runners[${i}]`;
+      if (!isRecord(runner)) {
+        problems.push(`${where}: must be an object`);
+        return;
+      }
+      unknownKeys(runner, RUNNER_KEYS, where, problems);
+      if (!isNonEmptyString(runner.name))
+        problems.push(`${where}.name: must be a non-empty string`);
+      if (!isMatcherList(runner.match)) problems.push(`${where}.match: ${MATCHER_PROBLEM}`);
+      if (runner.ignore !== undefined && !isMatcherList(runner.ignore)) {
+        problems.push(`${where}.ignore: ${MATCHER_PROBLEM}`);
+      }
+      if (typeof runner.command !== 'function') {
+        problems.push(`${where}.command: must be a function (files, repeats) => string | string[]`);
+      }
+    });
+  }
+  return {
+    repeats: (raw.repeats as number | undefined) ?? DEFAULT_BURN_IN_REPEATS,
+    maxFiles: (raw.maxFiles as number | undefined) ?? DEFAULT_BURN_IN_MAX_FILES,
+    runners: Array.isArray(runners) ? (runners as BurnInRunner[]) : []
+  };
+}
+
 export function validateConfig(raw: unknown): ResolvedConfig {
   if (!isRecord(raw)) {
     throw new ConfigError([
@@ -212,6 +288,8 @@ export function validateConfig(raw: unknown): ResolvedConfig {
   const steps = validateSteps(raw.steps, problems);
   const stderrAllowlist = validateAllowlist(raw.stderrAllowlist, problems);
   const protection = validateProtection(raw.protection, problems);
+  const flakes = validateFlakes(raw.flakes, problems);
+  const burnIn = validateBurnIn(raw.burnIn, problems);
   if (problems.length > 0) throw new ConfigError(problems);
   return {
     baseBranch: (raw.baseBranch as string | undefined) ?? DEFAULT_BASE_BRANCH,
@@ -220,6 +298,8 @@ export function validateConfig(raw: unknown): ResolvedConfig {
     steps,
     afterMerge: (raw.afterMerge as string | undefined) ?? null,
     stderrAllowlist,
-    protection
+    protection,
+    flakes,
+    burnIn
   };
 }
