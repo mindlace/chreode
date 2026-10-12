@@ -1,6 +1,6 @@
 {
   "name": "@mindlace/chreode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A deterministic, selective, unavoidable local-CI gate for agent-written code",
   "keywords": [
     "ci",
