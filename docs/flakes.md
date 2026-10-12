@@ -10,7 +10,8 @@ to make them visible and the playbook for killing them.
 **Telemetry.** Run your test runners with at least one retry (`retries: 1` in Playwright, `retry: 1` in
 vitest) and register chreode's reporters (see the README). Every test that fails and then
 passes on a retry is appended to `.chreode/flakes.jsonl` with the first attempt's error and,
-for Playwright, the failed attempt's trace. A reporter only sees a retry when the runner
+for Playwright, the local path of the failed attempt's trace (set `use: { trace: 'retain-on-failure' }`;
+with `'on-first-retry'` only the passing retry is traced, so nothing is logged). A reporter only sees a retry when the runner
 retries: with retries off there is nothing to record, and the reporters cannot tell that
 retries are off. Turn them on. Keep pure-logic suites at zero retries; they must not flake
 at all.
@@ -73,7 +74,8 @@ per-test timeout raises.
 
 ## Triaging a filed issue
 
-1. Read the first-attempt error and trace in the issue. Reproduce with the burn-in command
+1. Read the first-attempt error in the issue and open the trace at its local path (valid only
+   until the next Playwright run wipes `test-results/`). Reproduce with the burn-in command
    shape: the runner's own command, the one file, retries off.
 2. Diagnose with the playbook and fix it in a normal change. State the root cause when closing
    the issue: "re-ran it" is not a close reason.

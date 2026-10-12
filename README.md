@@ -113,6 +113,7 @@ recording to those runner projects.
 // playwright.config.ts
 export default defineConfig({
   retries: 1,
+  use: { trace: 'retain-on-failure' }, // 'on-first-retry' records no trace of the failed attempt
   reporter: [['list'], ['@mindlace/chreode/reporters/playwright']]
 });
 ```
@@ -128,20 +129,25 @@ export default defineConfig({
 
 Events go to `.chreode/flakes.jsonl` (signoff tells each step the absolute path in
 `CHREODE_FLAKE_LOG`, and the sha under test in `CHREODE_HEAD`). Add `.chreode/` to
-`.gitignore`; signoff refuses to run otherwise. `playwright` and `vitest` are optional peer
+`.gitignore`; when `flakes` is configured, signoff refuses to run otherwise. Registering the
+reporters without a `flakes` block just accumulates events in `.chreode/flakes.jsonl`, unreported.
+Filed issues carry the Playwright trace's local path, valid until the next Playwright run wipes
+`test-results/`, not the trace itself. `playwright` and `vitest` are optional peer
 dependencies: the reporters import only their types.
 
 **2. Ledger.** Add `flakes: {}` to the config. After the steps, pass or fail, signoff gives
 each flaking test one open issue labelled `flake` (the label is created if missing) and adds an
 occurrence comment each time it recurs. At `threshold` occurrences (default 3) signoff fails,
-listing the issue URLs in its failure output (no commit status is posted), until the flake is
-fixed or its issue is labelled `snoozeLabel` (default `flake-snoozed`). A GitHub error is a
+any run that sees that flake again fails, listing the issue URLs in its failure output (no
+commit status is posted), until the flake is fixed or its issue is labelled `snoozeLabel`
+(default `flake-snoozed`). A run that sees no flake events is silent. A GitHub error is a
 warning: the events not yet recorded stay in the log for the next run.
 `chreode flake-report` runs the same report outside signoff and exits 1 on escalation.
 
 **3. Burn-in.** `burnInStep({ when, timeoutMs? })` adds a step that runs every test file changed since the base
 `repeats` times with retries off, so a new flake fails before it lands rather than after three
-victims. Pass your test steps' triggers as `when`, and place it after them:
+victims. Pass your test steps' triggers as `when`, and place it after them. Its stderr is policed like a
+test step's, so it needs the same `stderrAllowlist` entries:
 
 ```ts
 import { burnInStep, defineConfig } from '@mindlace/chreode';
@@ -152,7 +158,7 @@ export default defineConfig({
     { label: 'test:e2e', run: 'npm run test:e2e', when: ['e2e'], policeStderr: true },
     burnInStep({ when: ['unit', 'e2e'] }) // timeoutMs defaults to 10 minutes
   ],
-  flakes: {}, // threshold: 3, snoozeLabel: 'flake-snoozed', playbookUrl: this repo's docs/flakes.md on GitHub
+  flakes: {}, // threshold: 3, snoozeLabel: 'flake-snoozed', playbookUrl: chreode's docs/flakes.md on GitHub
   burnIn: {
     repeats: 5, // default
     maxFiles: 12, // default; the overflow is listed, never silently dropped
