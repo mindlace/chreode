@@ -58,7 +58,7 @@ feedback; the local status is the merge gate).
 ## The model
 
 ```
-change ──► changed paths ──► triggers ──► planned steps ──► run (serialized, policed) ──► push ─► note ─► status
+change ──► changed paths ──► triggers ──► planned steps ──► run (serialized, policed) ──► push ─► status ─► note
             (since last        (rules,        (steps whose                                          (merge gate)
              signoff)          first match)    triggers fired)
 ```
@@ -83,9 +83,10 @@ change ──► changed paths ──► triggers ──► planned steps ──
 - **Merge main first.** The branch is merged with `origin/<base>` before
   testing, so what is signed off is what will land. A conflict exits non-zero
   and leaves the merge in progress.
-- **The status is the product.** On success: push, write the note, post
+- **The status is the product.** On success: push, post
   `<statusContext>` = success on HEAD with a description naming the signer and
-  any skipped steps. Branch protection requires that context.
+  any skipped steps, then write the note (a failed post must not leave a note
+  that makes the next run report "already signed off" with no status on GitHub). Branch protection requires that context.
 
 ## Config
 
@@ -157,7 +158,7 @@ rule emits is allowed — the unknown-path fallback can still fire it.
 Flags (each also settable by env, for agents whose harness forbids flags
 after `--`): `--full` / `CHREODE_FULL=1`, `--dry-run`, `--no-merge` /
 `CHREODE_NO_MERGE=1`, `--no-push` / `CHREODE_NO_PUSH=1`, `--allow-stderr` /
-`CHREODE_ALLOW_STDERR=1`, `--base <ref>`, `--skip <label>` (repeatable).
+`CHREODE_ALLOW_STDERR=1`, `--base <ref>`, `--skip <label>` (repeatable), `--config <path>`.
 
 Flow:
 
@@ -176,8 +177,8 @@ Flow:
    `CHREODE_SIGNOFF=1` to children so tools can quiet themselves under the
    gate. First failure releases the lock and exits 1. An empty plan touches no
    lock.
-6. **Tail** — `git push -u origin HEAD` (unless `--no-push`); write the note
-   (the labels that ran, or `no-op`); post the status; print the PR URL if one
+6. **Tail** — `git push -u origin HEAD` (unless `--no-push`); post the status; write
+   the note (the labels that ran, or `no-op`) only after the post succeeds; print the PR URL if one
    exists.
 
 Exit codes: 0 success / already signed off / dry-run; 1 step failure,
@@ -195,7 +196,7 @@ payloads.
 ## Package shape
 
 - Repo `github.com/mindlace/chreode` (public), local at
-  `~/Projects/chreode`. MIT, TypeScript (ESM, strict), Node ≥ 22. Package
+  `~/Projects/chreode`. MIT, TypeScript (ESM, strict), Node ≥ 22.12. Package
   `@mindlace/chreode`, compiled to `dist/` (consumers need no `tsx`). Bin:
   `chreode`.
 - Dependencies: `commander`, `proper-lockfile`, `jiti`, `picomatch`. Runtime
