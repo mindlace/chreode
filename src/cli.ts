@@ -3,7 +3,9 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Command } from 'commander';
+import { runBurnIn } from './burn-in/run.js';
 import { CONFIG_FILE, loadConfig } from './config/load.js';
+import { runFlakeReport } from './flakes/report.js';
 import type { ResolvedConfig } from './config/types.js';
 import { parseRepo } from './github/status.js';
 import { runProtect } from './github/protect.js';
@@ -24,6 +26,16 @@ export interface SignoffFlags {
 export interface ProtectFlags {
   dryRun?: boolean;
   repo?: string;
+  config?: string;
+}
+
+export interface FlakeReportFlags {
+  config?: string;
+}
+
+export interface BurnInFlags {
+  base: string;
+  head: string;
   config?: string;
 }
 
@@ -54,6 +66,8 @@ export function buildProgram(
   actions: {
     signoff: (flags: SignoffFlags) => Promise<number>;
     protect: (flags: ProtectFlags) => Promise<number>;
+    flakeReport: (flags: FlakeReportFlags) => Promise<number>;
+    burnIn: (flags: BurnInFlags) => Promise<number>;
   },
   setExit: (code: number) => void
 ): Command {
@@ -89,6 +103,20 @@ export function buildProgram(
     .option('--config <path>', `config file (default: <repo root>/${CONFIG_FILE})`)
     .action(async (flags: ProtectFlags) => setExit(await actions.protect(flags)));
 
+  program
+    .command('flake-report')
+    .description('report logged flakes to GitHub issues; exit 1 if any reached the threshold')
+    .option('--config <path>', `config file (default: <repo root>/${CONFIG_FILE})`)
+    .action(async (flags: FlakeReportFlags) => setExit(await actions.flakeReport(flags)));
+
+  program
+    .command('burn-in')
+    .description('run the test files changed in base..head repeatedly, with retries off')
+    .requiredOption('--base <sha>', 'diff from this commit')
+    .requiredOption('--head <sha>', 'diff to this commit')
+    .option('--config <path>', `config file (default: <repo root>/${CONFIG_FILE})`)
+    .action(async (flags: BurnInFlags) => setExit(await actions.burnIn(flags)));
+
   return program;
 }
 
@@ -115,6 +143,12 @@ export async function main(
         runProtect(await repoConfigLoader(flags.config)(), {
           dryRun: flags.dryRun === true,
           repo: flags.repo ? parseRepo(flags.repo) : null
+        }),
+      flakeReport: async (flags) => runFlakeReport(await repoConfigLoader(flags.config)()),
+      burnIn: async (flags) =>
+        runBurnIn((await repoConfigLoader(flags.config)()).burnIn, {
+          base: flags.base,
+          head: flags.head
         })
     },
     (c) => {
