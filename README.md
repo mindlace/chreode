@@ -42,7 +42,7 @@ Add `chreode.config.ts` at the repo root (see below), then:
 
 ```bash
 npx chreode signoff            # merge origin/main, run what changed, push, post the status
-npx chreode signoff --dry-run  # print the plan and stop
+npx chreode signoff --dry-run  # merge, then print the plan and stop
 npx chreode protect            # require the status on main (idempotent); --dry-run previews
 ```
 
@@ -54,7 +54,8 @@ Wire them into `package.json` as `"signoff": "chreode signoff"` and
 1. **Preconditions**: clean tree, a branch (not detached, not the base branch), not behind its
    upstream, `gh auth status` ok, `git config user.email` set.
 2. **Merge** `origin/<baseBranch>` (unless `--no-merge`). A conflict exits 1 and leaves the
-   merge in progress. When the merge changed the branch, `afterMerge` runs.
+   merge in progress. When the merge changed the branch, `afterMerge` runs and the config is
+   reloaded, so a merged-in `chreode.config.ts` governs the rest of the run.
 3. **Base**: `--base`, else the nearest commit on the branch carrying a `refs/notes/chreode`
    note (the last successful signoff), else the merge-base with `origin/<baseBranch>`.
 4. **Plan**: changed paths (both sides of renames, deletions included) → triggers (first
@@ -64,18 +65,21 @@ Wire them into `package.json` as `"signoff": "chreode signoff"` and
    machine. Each step runs in its own process group with a hard timeout; policed steps fail
    on unexpected stderr. Children see `CHREODE_SIGNOFF=1`.
 6. **Tail**: refuse if the steps changed the checkout; push; post `<statusContext>` = success
-   naming the signer and any `--skip`'d steps; write the note.
+   naming the signer and disclosing any `--skip`'d steps, stderr waived by `--allow-stderr`,
+   and `base=<ref>` for `--base`; write the note. A partial run (any of those three) writes
+   no note, so it never becomes the incremental base: the next signoff diffs from the last
+   full one and re-plans what was skipped.
 
-| Flag              | Env                      | Effect                                                |
-| ----------------- | ------------------------ | ----------------------------------------------------- |
-| `--full`          | `CHREODE_FULL=1`         | Ignore the incremental base; run every step           |
-| `--dry-run`       |                          | Print the plan and stop                               |
-| `--no-merge`      | `CHREODE_NO_MERGE=1`     | Do not merge `origin/<baseBranch>` first              |
-| `--no-push`       | `CHREODE_NO_PUSH=1`      | Do not push (the commit must already be on origin)    |
-| `--allow-stderr`  | `CHREODE_ALLOW_STDERR=1` | Downgrade policed stderr to a warning                 |
-| `--base <ref>`    |                          | Diff from this ref                                    |
-| `--skip <label>`  |                          | Skip a planned step (repeatable; named in the status) |
-| `--config <path>` |                          | Config file (default `<repo root>/chreode.config.ts`) |
+| Flag              | Env                      | Effect                                                                                                                       |
+| ----------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--full`          | `CHREODE_FULL=1`         | Ignore the incremental base; run every step                                                                                  |
+| `--dry-run`       |                          | Merge and run `afterMerge`, then print the plan and stop without running steps; add `--no-merge` for a side-effect-free look |
+| `--no-merge`      | `CHREODE_NO_MERGE=1`     | Do not merge `origin/<baseBranch>` first                                                                                     |
+| `--no-push`       | `CHREODE_NO_PUSH=1`      | Do not push (the commit must already be on origin)                                                                           |
+| `--allow-stderr`  | `CHREODE_ALLOW_STDERR=1` | Downgrade policed stderr to a warning (named in the status; no note)                                                         |
+| `--base <ref>`    |                          | Diff from this ref (named in the status; no note)                                                                            |
+| `--skip <label>`  |                          | Skip a planned step (repeatable; named in the status; no note)                                                               |
+| `--config <path>` |                          | Config file (default `<repo root>/chreode.config.ts`)                                                                        |
 
 Exit codes: `0` signed off, already signed off, or dry run; `1` anything else.
 
@@ -117,7 +121,7 @@ export default defineConfig({
       timeoutMs: 15 * 60_000
     }
   ],
-  afterMerge: 'npm install',
+  afterMerge: 'npm ci', // not `npm install`: see below
   stderrAllowlist: [{ pattern: /^\[WebServer\] /, reason: 'Playwright echoes the preview server' }]
 });
 ```
@@ -139,7 +143,9 @@ forgotten rule costs time, never coverage. Triggers are free-form strings.
 | `policeStderr` | boolean                     | Fail a clean exit that wrote non-allowlisted stderr.                   |
 | `timeoutMs`    | number                      | Hard ceiling; default 10 minutes.                                      |
 
-**`afterMerge`** runs only when merging `origin/<baseBranch>` changed the branch.
+**`afterMerge`** runs only when merging `origin/<baseBranch>` changed the branch. It must
+leave the checkout clean (signoff refuses to run otherwise), so use `npm ci`, which installs
+exactly the lockfile, rather than `npm install`, which can rewrite it.
 **`stderrAllowlist`** entries need a `reason`: allowlisting noise is a reviewed decision.
 Unknown keys, duplicate labels, and `supersededBy` naming a missing step are load errors.
 

@@ -65,7 +65,11 @@ export function buildProgram(
     .command('signoff')
     .description('merge the base branch, run the steps the changes need, push, post the status')
     .option('--full', 'ignore the incremental base and run every step (env CHREODE_FULL=1)')
-    .option('--dry-run', 'print the plan and stop')
+    .option(
+      '--dry-run',
+      'merge origin/<baseBranch> and run afterMerge as usual, then print the plan and stop ' +
+        'without running steps (add --no-merge for a side-effect-free look)'
+    )
     .option('--no-merge', 'do not merge origin/<baseBranch> first (env CHREODE_NO_MERGE=1)')
     .option(
       '--no-push',
