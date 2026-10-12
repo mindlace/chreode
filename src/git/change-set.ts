@@ -37,7 +37,8 @@ export function resolveRef(ref: string, exec: Exec = defaultExec): string {
  *  file moved out of a rule's reach still fires that rule; deletions are included. */
 export function committedPaths(base: string, head: string, exec: Exec = defaultExec): string[] {
   if (base === head) return [];
-  return lines(exec('git', ['diff', '--name-only', '--no-renames', `${base}..${head}`]));
+  const out = exec('git', ['diff', '--name-only', '--no-renames', '-z', `${base}..${head}`]);
+  return out.split('\0').filter((p) => p !== '');
 }
 
 export function isWorktree(exec: Exec = defaultExec): boolean {

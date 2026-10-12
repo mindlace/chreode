@@ -41,7 +41,7 @@ describe('committedPaths', () => {
 
   it('lists both sides of a rename so moving a file out of a rule still fires it', () => {
     const { exec } = fakeExec({
-      'git diff --name-only --no-renames b..h': 'scratch/x.ts\nsrc/x.ts\n'
+      'git diff --name-only --no-renames -z b..h': 'scratch/x.ts\0src/x.ts\0'
     });
     expect(committedPaths('b', 'h', exec)).toEqual(['scratch/x.ts', 'src/x.ts']);
   });
@@ -69,12 +69,14 @@ describe('committedPaths', () => {
       mkdirSync(join(dir, 'src'));
       writeFileSync(join(dir, 'src/x.ts'), 'export const x = 1;\nexport const y = 2;\n');
       writeFileSync(join(dir, 'gone.txt'), 'bye\n');
+      writeFileSync(join(dir, 'é ü.ts'), 'a\n');
       git('add', '-A');
       git('commit', '-q', '-m', 'one');
       const base = git('rev-parse', 'HEAD').trim();
       mkdirSync(join(dir, 'scratch'));
       renameSync(join(dir, 'src/x.ts'), join(dir, 'scratch/x.ts'));
       rmSync(join(dir, 'gone.txt'));
+      writeFileSync(join(dir, 'é ü.ts'), 'b\n');
       git('add', '-A');
       git('commit', '-q', '-m', 'two');
       const head = git('rev-parse', 'HEAD').trim();
@@ -83,7 +85,8 @@ describe('committedPaths', () => {
       expect(committedPaths(base, head, exec).sort()).toEqual([
         'gone.txt',
         'scratch/x.ts',
-        'src/x.ts'
+        'src/x.ts',
+        'é ü.ts'
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
