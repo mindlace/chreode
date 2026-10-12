@@ -265,14 +265,13 @@ lets a trusted publisher be attached to a package that already exists, so
 later versions publish from tags. sfhousing then installs it like any other
 dependency — no registry mapping or tokens.
 
-## Planafoot (later)
+## The upstream codebase (later)
 
-Planafoot migrates in its own follow-up: its burn-in, flake-report and
-worktree priming become ordinary config steps; its stderr allowlist moves to
-config; its `planafoot-*` lock is replaced by chreode's machine lock (until
-then, planafoot and chreode signoffs on one machine do not serialize against
-each other). Its `refs/notes/signoff` history is not migrated — the first
-chreode run there is a full run.
+The codebase chreode was extracted from migrates in its own follow-up: its
+burn-in, flake-report and worktree priming become ordinary config steps, its
+stderr allowlist moves to config, and its private lock is replaced by
+chreode's machine lock. Its existing signoff notes are not migrated — the
+first chreode run there is a full run.
 
 ## Decisions
 
