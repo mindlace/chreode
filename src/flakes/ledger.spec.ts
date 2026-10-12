@@ -71,6 +71,19 @@ describe('issueTitle', () => {
     expect(long).toHaveLength(256);
     expect(long.startsWith('flake(e2e): e2e/dep.spec.ts › xxx')).toBe(true);
   });
+
+  it('trims whitespace exposed by the cut, and a re-run still matches its issue', () => {
+    const prefix = 'flake(e2e): e2e/dep.spec.ts › ';
+    const title = `${'x'.repeat(256 - prefix.length - 1)} tail`;
+    const cut = issueTitle(event({ title }));
+    expect(cut.length).toBeLessThan(256);
+    expect(cut).toBe(cut.trimEnd());
+    const existing = { ...issue(), title: cut };
+    const { deps, created, comments } = fakeDeps([existing]);
+    processFlakeEvents([event({ title })], CTX, CONFIG, deps);
+    expect(created).toHaveLength(0);
+    expect(comments).toHaveLength(1);
+  });
 });
 
 describe('processFlakeEvents', () => {
@@ -87,6 +100,19 @@ describe('processFlakeEvents', () => {
       { number: 901, title: TITLE, url: 'https://gh/i/901', count: 1 }
     ]);
     expect(result.escalations).toEqual([]);
+  });
+
+  it('renders the title in a code span and fences errors longer than any backtick run', () => {
+    const { deps, created } = fakeDeps([]);
+    processFlakeEvents(
+      [event({ title: 'pings @user and #12', firstAttemptError: 'a\n```\nb' })],
+      CTX,
+      CONFIG,
+      deps
+    );
+    const body = created[0]!.body;
+    expect(body).toContain('`e2e/dep.spec.ts › pings @user and #12`');
+    expect(body).toContain('\n````\na\n```\nb\n````');
   });
 
   it("names the event's own sha over the run's", () => {

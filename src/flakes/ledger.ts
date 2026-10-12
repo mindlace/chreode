@@ -59,20 +59,35 @@ export class LedgerError extends Error {
 }
 
 export function issueTitle(event: FlakeEvent): string {
-  return `flake(${event.kind}): ${event.file} › ${event.title}`.slice(0, ISSUE_TITLE_MAX);
+  return `flake(${event.kind}): ${event.file} › ${event.title}`.slice(0, ISSUE_TITLE_MAX).trimEnd();
+}
+
+function longestRun(text: string): number {
+  return Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+}
+
+/** Inline code span that survives backticks in `text`; keeps @mentions and #refs inert. */
+function codeSpan(text: string): string {
+  const fence = '`'.repeat(longestRun(text) + 1);
+  const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+/** Fenced block whose fence is longer than any backtick run inside (minimum 3). */
+function codeFence(text: string): string[] {
+  const fence = '`'.repeat(Math.max(3, longestRun(text) + 1));
+  return [fence, text, fence];
 }
 
 function details(event: FlakeEvent, ctx: RunContext): string {
   const where = event.project === '' ? event.runner : `${event.runner}, project ${event.project}`;
   return [
-    `- **Test:** \`${event.file}\` › ${event.title} (${where})`,
+    `- **Test:** ${codeSpan(`${event.file} › ${event.title}`)} (${where})`,
     `- **Observed:** ${event.at} on \`${ctx.branch}\` @ ${event.sha ?? ctx.sha}`,
     ...(event.tracePath ? [`- **First-attempt trace:** \`${event.tracePath}\``] : []),
     '',
     '**First-attempt error:**',
-    '```',
-    event.firstAttemptError,
-    '```'
+    ...codeFence(event.firstAttemptError)
   ].join('\n');
 }
 
