@@ -88,12 +88,14 @@ export function buildProgram(
   return program;
 }
 
-/** Steps and git commands run from the repo root, whatever directory chreode was started in. */
-async function loadFromRepo(configFlag: string | undefined): Promise<ResolvedConfig> {
+/** Steps and git commands run from the repo root, whatever directory chreode was started in.
+ *  Returns a loader rather than a config: signoff reloads it after a merge. */
+function repoConfigLoader(configFlag: string | undefined): () => Promise<ResolvedConfig> {
   const explicit = configFlag ? path.resolve(configFlag) : null;
   const root = defaultExec('git', ['rev-parse', '--show-toplevel']).trim();
   process.chdir(root);
-  return loadConfig(explicit ?? path.join(root, CONFIG_FILE));
+  const file = explicit ?? path.join(root, CONFIG_FILE);
+  return () => loadConfig(file);
 }
 
 export async function main(
@@ -104,9 +106,9 @@ export async function main(
   const program = buildProgram(
     {
       signoff: async (flags) =>
-        runSignoff(await loadFromRepo(flags.config), resolveSignoffOptions(flags, env)),
+        runSignoff(repoConfigLoader(flags.config), resolveSignoffOptions(flags, env)),
       protect: async (flags) =>
-        runProtect(await loadFromRepo(flags.config), {
+        runProtect(await repoConfigLoader(flags.config)(), {
           dryRun: flags.dryRun === true,
           repo: flags.repo ? parseRepo(flags.repo) : null
         })

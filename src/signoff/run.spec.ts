@@ -38,6 +38,14 @@ const OPTS: SignoffOptions = {
   skip: []
 };
 
+const load = (config: ResolvedConfig) => async () => config;
+
+const MERGED: Record<string, Response> = {
+  'git fetch origin main': '',
+  'git rev-list HEAD..origin/main': 'abc\n',
+  'git merge --no-edit origin/main': ''
+};
+
 function scripted(over: Record<string, Response> = {}) {
   return fakeExec({
     'git status --porcelain': '',
@@ -96,7 +104,7 @@ function harness(
 describe('runSignoff', () => {
   it('runs the plan under the lock, then pushes, posts and notes', async () => {
     const h = harness();
-    expect(await runSignoff(CONFIG, OPTS, h.deps)).toBe(0);
+    expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(0);
     expect(h.events).toEqual([
       'acquire',
       'run lint',
@@ -109,32 +117,32 @@ describe('runSignoff', () => {
 
   it('an empty plan touches no lock and still signs off as a no-op', async () => {
     const h = harness({ 'git diff --name-only --no-renames -z b..h': 'docs/a.md\0' });
-    expect(await runSignoff(CONFIG, OPTS, h.deps)).toBe(0);
+    expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(0);
     expect(h.events).toEqual(['push', 'status h signed off by me@example.com', 'note h []']);
   });
 
   it('a failing step exits 1, releases the lock, and posts nothing', async () => {
     const h = harness({}, true);
-    expect(await runSignoff(CONFIG, OPTS, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(1);
     expect(h.events).toEqual(['acquire', 'run lint', 'release']);
   });
 
   it('--dry-run plans and stops: no lock, no tail', async () => {
     const h = harness();
-    expect(await runSignoff(CONFIG, { ...OPTS, dryRun: true }, h.deps)).toBe(0);
+    expect(await runSignoff(load(CONFIG), { ...OPTS, dryRun: true }, h.deps)).toBe(0);
     expect(h.events).toEqual([]);
   });
 
   it('refuses to post when the steps dirtied the tree', async () => {
     const h = harness({ 'git status --porcelain': ['', ' M package-lock.json\n'] });
-    expect(await runSignoff(CONFIG, OPTS, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(1);
     expect(h.events).toEqual(['acquire', 'run lint', 'release']);
     expect(h.errors.join('\n')).toContain('Nothing was posted');
   });
 
   it('a failed precondition exits 1 before merging', async () => {
     const h = harness({ 'git status --porcelain': ' M x\n' });
-    expect(await runSignoff(CONFIG, { ...OPTS, noMerge: false }, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), { ...OPTS, noMerge: false }, h.deps)).toBe(1);
     expect(h.calls.some((c) => c.startsWith('git fetch'))).toBe(false);
   });
 
@@ -145,26 +153,26 @@ describe('runSignoff', () => {
       'git merge --no-edit origin/main': new Error('CONFLICT'),
       'git rev-parse -q --verify MERGE_HEAD': 'abc\n'
     });
-    expect(await runSignoff(CONFIG, { ...OPTS, noMerge: false }, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), { ...OPTS, noMerge: false }, h.deps)).toBe(1);
     expect(h.events).toEqual([]);
     expect(h.errors.join('\n')).toContain('conflict');
   });
 
   it('nothing between base and HEAD exits 0 without running or posting', async () => {
     const h = harness();
-    expect(await runSignoff(CONFIG, { ...OPTS, base: 'h' }, h.deps)).toBe(0);
+    expect(await runSignoff(load(CONFIG), { ...OPTS, base: 'h' }, h.deps)).toBe(0);
     expect(h.events).toEqual([]);
   });
 
   it('an unknown --skip label exits 1', async () => {
     const h = harness();
-    expect(await runSignoff(CONFIG, { ...OPTS, skip: ['lnt'] }, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), { ...OPTS, skip: ['lnt'] }, h.deps)).toBe(1);
     expect(h.events).toEqual([]);
   });
 
   it('refuses to post when HEAD moved during the steps', async () => {
     const h = harness({ 'git rev-parse HEAD': ['h\n', 'other\n'] });
-    expect(await runSignoff(CONFIG, OPTS, h.deps)).toBe(1);
+    expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(1);
     expect(h.events).toEqual(['acquire', 'run lint', 'release']);
     expect(h.errors.join('\n')).toContain('Nothing was posted');
   });
@@ -177,7 +185,7 @@ describe('runSignoff', () => {
       'git status --porcelain': ['', ' M package-lock.json\n']
     });
     const config = { ...CONFIG, afterMerge: 'npm install' };
-    expect(await runSignoff(config, { ...OPTS, noMerge: false }, h.deps)).toBe(1);
+    expect(await runSignoff(load(config), { ...OPTS, noMerge: false }, h.deps)).toBe(1);
     expect(h.events).toEqual([]);
     expect(h.errors.join('\n')).toContain('afterMerge');
   });
@@ -185,13 +193,13 @@ describe('runSignoff', () => {
   describe('a partial run posts but writes no note', () => {
     it('--skip', async () => {
       const h = harness();
-      expect(await runSignoff(CONFIG, { ...OPTS, skip: ['lint'] }, h.deps)).toBe(0);
+      expect(await runSignoff(load(CONFIG), { ...OPTS, skip: ['lint'] }, h.deps)).toBe(0);
       expect(h.events).toEqual(['push', 'status h signed off by me@example.com (skipped: lint)']);
     });
 
     it('--base', async () => {
       const h = harness();
-      expect(await runSignoff(CONFIG, { ...OPTS, base: 'b' }, h.deps)).toBe(0);
+      expect(await runSignoff(load(CONFIG), { ...OPTS, base: 'b' }, h.deps)).toBe(0);
       expect(h.events).toEqual([
         'acquire',
         'run lint',
@@ -203,7 +211,7 @@ describe('runSignoff', () => {
 
     it('--allow-stderr that let a step pass', async () => {
       const h = harness({}, false, 'allowed-stderr');
-      expect(await runSignoff(CONFIG, { ...OPTS, allowStderr: true }, h.deps)).toBe(0);
+      expect(await runSignoff(load(CONFIG), { ...OPTS, allowStderr: true }, h.deps)).toBe(0);
       expect(h.events).toEqual([
         'acquire',
         'run lint',
@@ -211,6 +219,49 @@ describe('runSignoff', () => {
         'push',
         'status h signed off by me@example.com (allowed stderr: lint)'
       ]);
+    });
+  });
+
+  describe('after a merge', () => {
+    const MERGED_CONFIG: ResolvedConfig = {
+      ...CONFIG,
+      rules: [{ match: 'src/**', triggers: ['unit'] }],
+      steps: [{ ...CONFIG.steps[0]!, label: 'unit', run: 'npm test', when: ['unit'] }]
+    };
+
+    it('plans with the config the merge brought in', async () => {
+      const h = harness(MERGED);
+      const loads: ResolvedConfig[] = [CONFIG, MERGED_CONFIG];
+      const loader = async () => loads.shift()!;
+      expect(await runSignoff(loader, { ...OPTS, noMerge: false }, h.deps)).toBe(0);
+      expect(loads).toEqual([]);
+      expect(h.events).toContain('run unit');
+      expect(h.events).not.toContain('run lint');
+    });
+
+    it('does not reload when nothing was merged', async () => {
+      const h = harness();
+      let n = 0;
+      const loader = async () => {
+        n += 1;
+        return CONFIG;
+      };
+      expect(await runSignoff(loader, OPTS, h.deps)).toBe(0);
+      expect(n).toBe(1);
+    });
+
+    it('a merged config that fails to load exits 1 and runs nothing', async () => {
+      const h = harness(MERGED);
+      const loads: Array<() => ResolvedConfig> = [
+        () => CONFIG,
+        () => {
+          throw new Error('steps[0].label must be a string');
+        }
+      ];
+      const loader = async () => loads.shift()!();
+      expect(await runSignoff(loader, { ...OPTS, noMerge: false }, h.deps)).toBe(1);
+      expect(h.events).toEqual([]);
+      expect(h.errors.join('\n')).toContain('steps[0].label must be a string');
     });
   });
 });

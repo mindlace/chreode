@@ -85,12 +85,17 @@ export function printPlan(
   }
 }
 
+/**
+ * `loadConfig` is called once up front and again after a merge that changed the branch, so
+ * a merge that brings in a new chreode.config.ts is planned and run under that config.
+ */
 export async function runSignoff(
-  config: ResolvedConfig,
+  loadConfig: () => Promise<ResolvedConfig>,
   opts: SignoffOptions,
   overrides: Partial<SignoffDeps> = {}
 ): Promise<number> {
-  const d: SignoffDeps = { ...defaultDeps(config, opts), ...overrides };
+  let config = await loadConfig();
+  let d: SignoffDeps = { ...defaultDeps(config, opts), ...overrides };
   const baseBranch = config.baseBranch;
 
   // 1. Preconditions
@@ -138,6 +143,17 @@ export async function runSignoff(
         return 1;
       }
     }
+    // The merge may have changed the config itself: plan under what is now checked out.
+    try {
+      config = await loadConfig();
+    } catch (err) {
+      d.error(
+        `[chreode] the config merged in from origin/${baseBranch} failed to load: ${message(err)}\n` +
+          `Fix it in a commit on this branch, then re-run signoff.`
+      );
+      return 1;
+    }
+    d = { ...defaultDeps(config, opts), ...overrides };
   }
 
   // 3. Resolve base
