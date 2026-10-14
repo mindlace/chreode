@@ -119,7 +119,7 @@ export default defineConfig({
 ```
 
 ```ts
-// vitest.config.ts (reporters are root-level only)
+// vitest.config.ts (reporters are root-level only; keep 'default' explicit, see below)
 import VitestFlakeReporter from '@mindlace/chreode/reporters/vitest';
 
 export default defineConfig({
@@ -239,6 +239,15 @@ forgotten rule costs time, never coverage. Triggers are free-form strings.
 leave the checkout clean (signoff refuses to run otherwise), so use `npm ci`, which installs
 exactly the lockfile, rather than `npm install`, which can rewrite it.
 **`stderrAllowlist`** entries need a `reason`: allowlisting noise is a reviewed decision.
+
+**Pin vitest's `reporters`** in any project whose test steps police stderr. With no
+`reporters` set, vitest picks its `agent` reporter whenever it detects an AI agent (`AI_AGENT`,
+`CLAUDECODE`, `CODEX_*` and others, via std-env), and that reporter hides console output from
+passing tests. Signoff would then pass under an agent and fail for a human on the same commit.
+An explicit `reporters: ['default']` (plus `VitestFlakeReporter` when flakes is on) makes every
+run show that output, so a stray `console.error` fails signoff whoever runs it. Assert expected
+logs in the test (`vi.spyOn(console, 'error')`) rather than allowlisting them.
+
 Unknown keys, duplicate labels, and `supersededBy` naming a missing step are load errors.
 
 **`flakes`** (presence turns flake tracking on) and **`burnIn`** are described under
