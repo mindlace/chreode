@@ -10,7 +10,8 @@ import {
   resolveSignoffOptions,
   type BurnInFlags,
   type FlakeReportFlags,
-  type SignoffFlags
+  type SignoffFlags,
+  type TimingCheckFlags
 } from './cli.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,7 +68,8 @@ describe('buildProgram', () => {
         },
         protect: async () => 0,
         flakeReport: async () => 0,
-        burnIn: async () => 0
+        burnIn: async () => 0,
+        timingCheck: async () => 0
       },
       () => {}
     );
@@ -84,7 +86,11 @@ describe('buildProgram', () => {
     });
   });
 
-  function trapped(seen: { burnIn?: BurnInFlags; flakeReport?: FlakeReportFlags }) {
+  function trapped(seen: {
+    burnIn?: BurnInFlags;
+    flakeReport?: FlakeReportFlags;
+    timingCheck?: TimingCheckFlags;
+  }) {
     const p = buildProgram(
       {
         signoff: async () => 0,
@@ -95,6 +101,10 @@ describe('buildProgram', () => {
         },
         burnIn: async (flags) => {
           seen.burnIn = flags;
+          return 0;
+        },
+        timingCheck: async (flags) => {
+          seen.timingCheck = flags;
           return 0;
         }
       },
@@ -111,6 +121,22 @@ describe('buildProgram', () => {
     await trapped(seen).parseAsync(['flake-report', '--config', 'c.ts'], { from: 'user' });
     expect(seen.burnIn).toMatchObject({ base: 'b', head: 'h' });
     expect(seen.flakeReport).toMatchObject({ config: 'c.ts' });
+  });
+
+  it('parses timing-check --head and defaults it to HEAD', async () => {
+    const seen: { timingCheck?: TimingCheckFlags } = {};
+    await trapped(seen).parseAsync(['timing-check'], { from: 'user' });
+    expect(seen.timingCheck).toEqual({ head: 'HEAD' });
+    await trapped(seen).parseAsync(['timing-check', '--head', 'abc', '--config', 'c.ts'], {
+      from: 'user'
+    });
+    expect(seen.timingCheck).toEqual({ head: 'abc', config: 'c.ts' });
+  });
+
+  it('timing-check rejects --base', async () => {
+    await expect(
+      trapped({}).parseAsync(['timing-check', '--base', 'b'], { from: 'user' })
+    ).rejects.toThrow("unknown option '--base'");
   });
 
   it('burn-in requires --head', async () => {

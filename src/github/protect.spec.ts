@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedConfig } from '../config/types.js';
+import { resolveTiming, type ResolvedConfig } from '../config/types.js';
 import type { Exec } from '../run/exec.js';
 import { protectionPayloads, runProtect } from './protect.js';
 
@@ -14,6 +14,7 @@ const base: ResolvedConfig = {
   protection: {},
   flakes: null,
   burnIn: null,
+  timing: resolveTiming(),
   versionBumpTriggers: []
 };
 

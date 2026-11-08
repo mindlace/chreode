@@ -72,6 +72,42 @@ export interface BurnInConfig {
   runners: BurnInRunner[];
 }
 
+export type TimingRuleId = 'fixed-wait' | 'timeout-raise' | 'retries-raise' | 'skip';
+
+export const TIMING_RULE_IDS: readonly TimingRuleId[] = [
+  'fixed-wait',
+  'timeout-raise',
+  'retries-raise',
+  'skip'
+];
+
+export interface TimingAllowEntry {
+  path: Matcher | Matcher[];
+  rule: TimingRuleId;
+  pattern?: RegExp;
+  /** Why this exemption is justified. Required: allowing is a reviewed decision. */
+  reason: string;
+}
+
+export interface TimingConfig {
+  /** Files the check reads. Default: common test-file and test-config globs. */
+  match?: Matcher | Matcher[];
+  /** Performance tests: never checked.
+   *  Default: ['**\/*.perf.*', '**\/perf/**', '**\/*.bench.*', '**\/bench/**']. */
+  perf?: Matcher | Matcher[];
+  /** Rules to turn off, by id. */
+  disable?: TimingRuleId[];
+  /** Reviewed exemptions. */
+  allow?: TimingAllowEntry[];
+}
+
+export interface ResolvedTiming {
+  match: Matcher[];
+  perf: Matcher[];
+  disable: TimingRuleId[];
+  allow: TimingAllowEntry[];
+}
+
 export interface ResolvedFlakes {
   threshold: number;
   snoozeLabel: string;
@@ -98,6 +134,7 @@ export interface ChreodeConfig {
   protection?: ProtectionConfig;
   flakes?: FlakesConfig;
   burnIn?: BurnInConfig;
+  timing?: TimingConfig;
 }
 
 export interface ResolvedStep extends StepConfig {
@@ -117,6 +154,7 @@ export interface ResolvedConfig {
   protection: ProtectionConfig;
   flakes: ResolvedFlakes | null;
   burnIn: ResolvedBurnIn | null;
+  timing: ResolvedTiming;
 }
 
 export const DEFAULT_BASE_BRANCH = 'main';
@@ -127,6 +165,37 @@ export const DEFAULT_SNOOZE_LABEL = 'flake-snoozed';
 export const DEFAULT_PLAYBOOK_URL = 'https://github.com/mindlace/chreode/blob/main/docs/flakes.md';
 export const DEFAULT_BURN_IN_REPEATS = 5;
 export const DEFAULT_BURN_IN_MAX_FILES = 12;
+export const DEFAULT_TIMING_MATCH: readonly string[] = [
+  '**/*.{spec,test}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}',
+  '**/e2e/**',
+  '**/tests/**',
+  '**/test/**',
+  '**/{playwright,vitest,vite,jest}.config.*',
+  '**/vitest.workspace.*'
+];
+export const DEFAULT_TIMING_PERF: readonly string[] = [
+  '**/*.perf.*',
+  '**/perf/**',
+  '**/*.bench.*',
+  '**/bench/**'
+];
+
+function toMatcherArray(
+  v: Matcher | Matcher[] | undefined,
+  fallback: readonly string[]
+): Matcher[] {
+  if (v === undefined) return [...fallback];
+  return Array.isArray(v) ? [...v] : [v];
+}
+
+export function resolveTiming(config: TimingConfig = {}): ResolvedTiming {
+  return {
+    match: toMatcherArray(config.match, DEFAULT_TIMING_MATCH),
+    perf: toMatcherArray(config.perf, DEFAULT_TIMING_PERF),
+    disable: [...(config.disable ?? [])],
+    allow: [...(config.allow ?? [])]
+  };
+}
 
 export function resolveFlakes(config: FlakesConfig): ResolvedFlakes {
   return {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fakeExec, type Response } from '../../test/support/fake-exec.js';
-import type { ResolvedConfig } from '../config/types.js';
+import { resolveTiming, type ResolvedConfig } from '../config/types.js';
 import type { FlakeIssue, FlakeLedgerDeps } from '../flakes/ledger.js';
 import { appendFlakeEvent, readFlakeEvents, type FlakeEvent } from '../flakes/log.js';
 import type { MachineLock } from '../lock/machine-lock.js';
@@ -19,6 +19,7 @@ const CONFIG: ResolvedConfig = {
   protection: {},
   flakes: null,
   burnIn: null,
+  timing: resolveTiming(),
   versionBumpTriggers: [],
   rules: [
     { match: 'docs/**', triggers: [] },

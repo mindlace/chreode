@@ -1,4 +1,4 @@
-import type { ChreodeConfig } from './src/index.js';
+import { timingStep, type ChreodeConfig } from './src/index.js';
 
 // chreode gates itself, from this checkout's own build (`npm run signoff` builds first).
 const config: ChreodeConfig = {
@@ -18,8 +18,37 @@ const config: ChreodeConfig = {
     { label: 'lint', run: 'npm run lint', when: ['lint'] },
     { label: 'typecheck', run: 'npm run typecheck', when: ['typecheck'] },
     { label: 'test', run: 'npm test', when: ['test'], policeStderr: true },
+    // chreode is not installed in its own node_modules; `npm run signoff` builds dist/ first.
+    {
+      ...timingStep({ when: ['test'] }),
+      run: ({ head }) => `node dist/cli.js timing-check --head ${head}`
+    },
     { label: 'lint:workflows', run: 'actionlint', when: ['workflows'] }
   ],
+  timing: {
+    allow: [
+      {
+        path: 'src/timing/**/*.spec.ts',
+        rule: 'fixed-wait',
+        reason: 'rule fixtures: banned text as data'
+      },
+      {
+        path: 'src/timing/**/*.spec.ts',
+        rule: 'timeout-raise',
+        reason: 'rule fixtures: banned text as data'
+      },
+      {
+        path: 'src/timing/**/*.spec.ts',
+        rule: 'retries-raise',
+        reason: 'rule fixtures: banned text as data'
+      },
+      {
+        path: 'src/timing/**/*.spec.ts',
+        rule: 'skip',
+        reason: 'rule fixtures: banned text as data'
+      }
+    ]
+  },
   afterMerge: 'npx -y npm@11.21.0 ci'
 };
 

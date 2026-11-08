@@ -46,6 +46,7 @@ npx chreode signoff --dry-run  # merge, then print the plan and stop
 npx chreode protect            # require the status on main (idempotent); --dry-run previews
 npx chreode flake-report       # report logged flakes to GitHub issues (signoff does this itself)
 npx chreode burn-in --base <sha> --head <sha>  # run changed test files N times, retries off
+npx chreode timing-check        # fail on timing crutches the branch adds to tests
 ```
 
 Wire them into `package.json` as `"signoff": "chreode signoff"` and
@@ -188,6 +189,59 @@ A changed file goes to the first runner that matches it and does not `ignore` it
 runner takes are not burned in, and deleted files never are. Commands run from the repo root
 with inherited output; the first failure fails the step and names the files and the command.
 
+**4. Timing check.** `timingStep({ when, timeoutMs? })` adds a step (label `timing`, stderr policed)
+that fails when a branch adds a timing crutch to a test. Place it with the test steps; it runs only
+when there is a range to check. It reads the lines added in `origin/<baseBranch>...HEAD`, so legacy
+code never blocks a merge and an edit that only reformats a line is quiet. It runs no tests. Four
+rules, each with a stable id:
+
+- `fixed-wait`: a new `waitForTimeout(`, a `setTimeout` promise (including an awaited
+  `node:timers/promises` `setTimeout(<ms>)`), or a `sleep(`/`delay(`/`wait(<n>)` helper call.
+  Calls under fake timers are not flagged.
+- `timeout-raise`: a test or config timeout set higher than the value it replaces, or set where
+  none was removed. A type annotation (`timeout: number`) sets nothing and is not flagged.
+- `retries-raise`: `retries`/`retry` raised above both the old value and 1. Retries up to 1 are
+  never flagged, so turning on flake telemetry (`retries: 1`) needs no exemption; raising retries
+  above 1 is flagged. `retry: false` counts as 0; `retry: true` (unlimited) is flagged.
+- `skip`: a new unconditional `test.skip(`, `it.skip(`, `describe.skip(`, `test.fixme(`, `xit(` or
+  `xdescribe(` (a literal `true` condition counts as unconditional). A conditional platform gate
+  such as `test.skip(browserName === 'webkit', '…')` is not.
+
+Lines are compared per hunk, so moved code counts as new: a renamed or moved file is read as added
+in full, and a block moved far within a file reads as removed in one place and added in another.
+Legacy crutches in moved code are checked again. Defining a `sleep`/`delay` helper in test code is
+itself flagged, at the definition as well as at each call.
+
+```ts
+import { defineConfig, timingStep } from '@mindlace/chreode';
+
+export default defineConfig({
+  steps: [
+    { label: 'test', run: 'npm test', when: ['test'], policeStderr: true },
+    timingStep({ when: ['test'] }) // timeoutMs defaults to 10 minutes
+  ],
+  timing: {
+    // match: test files and test configs; the default covers *.spec.*, *.test.*, e2e/, tests/, test/
+    perf: ['**/*.perf.*', '**/perf/**', '**/*.bench.*', '**/bench/**'], // default; never checked
+    disable: [], // rule ids to turn off: 'fixed-wait' | 'timeout-raise' | 'retries-raise' | 'skip'
+    allow: [
+      {
+        path: 'e2e/legacy/**',
+        rule: 'fixed-wait',
+        pattern: /waitForTimeout\(250\)/, // optional: narrows the entry to matching lines
+        reason: 'animation has no observable end state' // required
+      }
+    ]
+  }
+});
+```
+
+Performance tests are exempt by path (`timing.perf`); everything else needs a reviewed
+`timing.allow` entry with a `reason`. `timing.disable` turns a rule off for the whole repo, so it
+is an exemption too; like `perf`, it is visible in the review of `chreode.config.ts`, not in the
+step's output. There are no inline comments to opt out: editing `chreode.config.ts` is the
+reviewed change. Every `allow` entry used is printed with its reason, pass or fail.
+
 ## Config reference
 
 ```ts
@@ -261,9 +315,10 @@ logs in the test (`vi.spyOn(console, 'error')`) rather than allowlisting them.
 
 Unknown keys, duplicate labels, and `supersededBy` naming a missing step are load errors.
 
-**`flakes`** (presence turns flake tracking on) and **`burnIn`** are described under
+**`flakes`** (presence turns flake tracking on), **`burnIn`** and **`timing`** are described under
 [Flakes](#flakes). `threshold`, `repeats` and `maxFiles` must be positive integers, and
-`burnIn.runners` must be non-empty.
+`burnIn.runners` must be non-empty. Unknown rule ids in `timing.disable` or `timing.allow`, and a
+`timing.allow` entry without a `reason`, are load errors.
 
 ## License
 

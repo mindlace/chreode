@@ -5,6 +5,8 @@ import {
   DEFAULT_STATUS_CONTEXT,
   DEFAULT_TIMEOUT_MS,
   resolveFlakes,
+  resolveTiming,
+  TIMING_RULE_IDS,
   type AllowlistEntry,
   type BurnInRunner,
   type FlakesConfig,
@@ -13,8 +15,12 @@ import {
   type ResolvedConfig,
   type ResolvedFlakes,
   type ResolvedStep,
+  type ResolvedTiming,
   type RuleConfig,
-  type StepConfig
+  type StepConfig,
+  type TimingAllowEntry,
+  type TimingConfig,
+  type TimingRuleId
 } from './types.js';
 
 export class ConfigError extends Error {
@@ -34,7 +40,8 @@ const TOP_KEYS = new Set([
   'stderrAllowlist',
   'protection',
   'flakes',
-  'burnIn'
+  'burnIn',
+  'timing'
 ]);
 const RULE_KEYS = new Set(['match', 'triggers']);
 const STEP_KEYS = new Set([
@@ -51,6 +58,9 @@ const PROTECTION_KEYS = new Set(['branch', 'repo']);
 const FLAKES_KEYS = new Set(['threshold', 'snoozeLabel', 'playbookUrl']);
 const BURN_IN_KEYS = new Set(['repeats', 'maxFiles', 'runners']);
 const RUNNER_KEYS = new Set(['name', 'match', 'ignore', 'command']);
+const TIMING_KEYS = new Set(['match', 'perf', 'disable', 'allow']);
+const TIMING_ALLOW_KEYS = new Set(['path', 'rule', 'pattern', 'reason']);
+const RULE_ID_PROBLEM = `must be one of ${TIMING_RULE_IDS.join(', ')}`;
 const MATCHER_PROBLEM = 'must be a glob string, a RegExp, or a non-empty array of them';
 
 /** Cross-realm safe: a config evaluated by jiti may not share this realm's RegExp. */
@@ -283,6 +293,60 @@ function validateBurnIn(raw: unknown, problems: string[]): ResolvedBurnIn | null
   };
 }
 
+function isTimingRuleId(v: unknown): v is TimingRuleId {
+  return TIMING_RULE_IDS.includes(v as TimingRuleId);
+}
+
+function validateTiming(raw: unknown, problems: string[]): ResolvedTiming {
+  if (raw === undefined) return resolveTiming();
+  if (!isRecord(raw)) {
+    problems.push('config.timing: must be an object');
+    return resolveTiming();
+  }
+  unknownKeys(raw, TIMING_KEYS, 'timing', problems);
+  for (const key of ['match', 'perf'] as const) {
+    if (raw[key] !== undefined && !isMatcherList(raw[key])) {
+      problems.push(`timing.${key}: ${MATCHER_PROBLEM}`);
+    }
+  }
+  let disable: TimingRuleId[] = [];
+  if (raw.disable !== undefined) {
+    if (!Array.isArray(raw.disable)) {
+      problems.push('timing.disable: must be an array of rule ids');
+    } else {
+      raw.disable.forEach((id: unknown, i) => {
+        if (!isTimingRuleId(id)) problems.push(`timing.disable[${i}]: ${RULE_ID_PROBLEM}`);
+      });
+      disable = raw.disable.filter(isTimingRuleId);
+    }
+  }
+  let allow: TimingAllowEntry[] = [];
+  if (raw.allow !== undefined) {
+    if (!Array.isArray(raw.allow)) {
+      problems.push('timing.allow: must be an array');
+    } else {
+      raw.allow.forEach((entry: unknown, i) => {
+        const where = `timing.allow[${i}]`;
+        if (!isRecord(entry)) {
+          problems.push(`${where}: must be an object`);
+          return;
+        }
+        unknownKeys(entry, TIMING_ALLOW_KEYS, where, problems);
+        if (!isMatcherList(entry.path)) problems.push(`${where}.path: ${MATCHER_PROBLEM}`);
+        if (!isTimingRuleId(entry.rule)) problems.push(`${where}.rule: ${RULE_ID_PROBLEM}`);
+        if (entry.pattern !== undefined && !isRegExp(entry.pattern)) {
+          problems.push(`${where}.pattern: must be a RegExp`);
+        }
+        if (!isNonEmptyString(entry.reason)) {
+          problems.push(`${where}.reason: must be a non-empty string`);
+        }
+      });
+      allow = raw.allow.filter(isRecord) as unknown as TimingAllowEntry[];
+    }
+  }
+  return resolveTiming({ ...(raw as TimingConfig), disable, allow });
+}
+
 export function validateConfig(raw: unknown): ResolvedConfig {
   if (!isRecord(raw)) {
     throw new ConfigError([
@@ -303,6 +367,7 @@ export function validateConfig(raw: unknown): ResolvedConfig {
   const protection = validateProtection(raw.protection, problems);
   const flakes = validateFlakes(raw.flakes, problems);
   const burnIn = validateBurnIn(raw.burnIn, problems);
+  const timing = validateTiming(raw.timing, problems);
   if (problems.length > 0) throw new ConfigError(problems);
   return {
     baseBranch: (raw.baseBranch as string | undefined) ?? DEFAULT_BASE_BRANCH,
@@ -314,6 +379,7 @@ export function validateConfig(raw: unknown): ResolvedConfig {
     stderrAllowlist,
     protection,
     flakes,
-    burnIn
+    burnIn,
+    timing
   };
 }

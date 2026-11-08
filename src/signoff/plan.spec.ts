@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { ResolvedConfig, ResolvedStep, RuleConfig, StepContext } from '../config/types.js';
+import {
+  resolveTiming,
+  type ResolvedConfig,
+  type ResolvedStep,
+  type RuleConfig,
+  type StepContext
+} from '../config/types.js';
 import { PlanError, fireTriggers, matchRule, planSignoff, type PlanInput } from './plan.js';
 
 type StepSpec = Partial<ResolvedStep> & { label: string; when: string[] };
@@ -18,6 +24,7 @@ function config(
     protection: {},
     flakes: null,
     burnIn: null,
+    timing: resolveTiming(),
     rules,
     steps: steps.map((s) => ({
       run: `run ${s.label}`,
