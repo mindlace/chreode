@@ -41,8 +41,10 @@ time. A deflake change touches the test file, so it is burned in automatically.
 list at the moment the code is written, reading only the lines a branch adds. Burn-in on an idle
 machine misses timing dependence; this check does not run tests at all. A violation names the
 file, line and rule: the fix is in _The playbook_ below (a readiness signal, not a longer wait).
-The only exemptions are `timing.perf` (performance tests, by path) and reviewed `timing.allow`
-entries with a reason; every exemption used is printed.
+Exemptions live in `chreode.config.ts`, where review sees them: `timing.perf` (by path),
+`timing.disable` (turns a rule off repo-wide) and `timing.allow` entries with a reason (each one
+used is printed). A renamed or moved file reads as added in full, so legacy crutches in it are
+checked again, and defining a sleep or delay helper is itself flagged.
 
 ## The playbook
 

@@ -195,16 +195,22 @@ when there is a range to check. It reads the lines added in `origin/<baseBranch>
 code never blocks a merge and an edit that only reformats a line is quiet. It runs no tests. Four
 rules, each with a stable id:
 
-- `fixed-wait`: a new `waitForTimeout(`, a `setTimeout` promise, or a `sleep(`/`delay(`/`wait(<n>)`
-  helper call. Calls under fake timers are not flagged.
+- `fixed-wait`: a new `waitForTimeout(`, a `setTimeout` promise (including an awaited
+  `node:timers/promises` `setTimeout(<ms>)`), or a `sleep(`/`delay(`/`wait(<n>)` helper call.
+  Calls under fake timers are not flagged.
 - `timeout-raise`: a test or config timeout set higher than the value it replaces, or set where
-  none was removed.
+  none was removed. A type annotation (`timeout: number`) sets nothing and is not flagged.
 - `retries-raise`: `retries`/`retry` raised above both the old value and 1. Retries up to 1 are
   never flagged, so turning on flake telemetry (`retries: 1`) needs no exemption; raising retries
-  above 1 is flagged.
+  above 1 is flagged. `retry: false` counts as 0; `retry: true` (unlimited) is flagged.
 - `skip`: a new unconditional `test.skip(`, `it.skip(`, `describe.skip(`, `test.fixme(`, `xit(` or
-  `xdescribe(`. A conditional platform gate such as `test.skip(browserName === 'webkit', '…')` is
+  `xdescribe(` (a literal `true` condition counts as unconditional). A conditional platform gate such as `test.skip(browserName === 'webkit', '…')` is
   not.
+
+Lines are compared per hunk, so moved code counts as new: a renamed or moved file is read as added
+in full, and a block moved far within a file reads as removed in one place and added in another.
+Legacy crutches in moved code are checked again. Defining a `sleep`/`delay` helper in test code is
+itself flagged, at the definition as well as at each call.
 
 ```ts
 import { defineConfig, timingStep } from '@mindlace/chreode';
@@ -231,9 +237,10 @@ export default defineConfig({
 ```
 
 Performance tests are exempt by path (`timing.perf`); everything else needs a reviewed
-`timing.allow` entry with a `reason`. There are no inline comments to opt out: editing
-`chreode.config.ts` is the reviewed change. Every exemption used is printed with its reason, pass
-or fail.
+`timing.allow` entry with a `reason`. `timing.disable` turns a rule off for the whole repo, so it
+is an exemption too; like `perf`, it is visible in the review of `chreode.config.ts`, not in the
+step's output. There are no inline comments to opt out: editing `chreode.config.ts` is the
+reviewed change. Every `allow` entry used is printed with its reason, pass or fail.
 
 ## Config reference
 
