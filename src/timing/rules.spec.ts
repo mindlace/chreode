@@ -14,7 +14,10 @@ describe('fixed-wait', () => {
     'await new Promise(resolve => setTimeout(resolve, 1_000))',
     'await sleep(200);',
     'await delay(50);',
-    'await wait(1000);'
+    'await wait(1000);',
+    'await setTimeout(500);',
+    'await setTimeout(1_000, undefined, { signal });',
+    'await setTimeout(DELAY_MS);'
   ])('flags %s', (t) => {
     expect(evaluateHunk(added(t), ['fixed-wait'])).toHaveLength(1);
   });
@@ -28,6 +31,9 @@ describe('fixed-wait', () => {
     'await wait(() => ready);',
     "await page.waitForSelector('#x');",
     "setTimeout(() => emit('tick'), 0);",
+    'const t = setTimeout(500);',
+    'await setTimeout(() => done(), 0);',
+    'await setTimeout(function () {}, 0);',
     'await retryDelay(3);',
     "await page.keyboard.type('hi', { delay: 50 });",
     '// never page.waitForTimeout(500) here',
@@ -49,7 +55,9 @@ describe('skip', () => {
     'test.describe.fixme(() => {',
     "xit('x', () => {",
     "xtest('x', () => {",
-    "xdescribe('x', () => {"
+    "xdescribe('x', () => {",
+    "test.skip(true, 'flaky');",
+    'test.fixme( true );'
   ])('flags %s', (t) => {
     expect(evaluateHunk(added(t), ['skip'])).toHaveLength(1);
   });
@@ -58,6 +66,7 @@ describe('skip', () => {
     "test.skip(browserName === 'webkit', 'no webkit');",
     "test.skip(({ browserName }) => browserName === 'webkit');",
     "test.fixme(isMobile, 'later');",
+    "test.skip(trueOnCi, 'later');",
     "it.skipIf(process.platform === 'win32')('x', () => {",
     "// test.skip('x')",
     'const skip = items.slice(1);'

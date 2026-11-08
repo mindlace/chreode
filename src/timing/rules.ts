@@ -40,6 +40,8 @@ const FAKE_TIMER =
 const FIXED_WAIT = [
   /\bwaitForTimeout\(/,
   /\bnew Promise\(.*\bsetTimeout\(/,
+  // node:timers/promises: an awaited setTimeout whose first argument is not a callback
+  /\bawait\s+setTimeout\(\s*(?!\(|function\b|async\b)/,
   /\bsleep\(/,
   /\bdelay\(/,
   /\bwait\(\s*\d/
@@ -51,8 +53,8 @@ export function isFixedWait(text: string): boolean {
 }
 
 const SKIP = [
-  /\b(?:test|it|describe)\.skip\(\s*(?:['"`]|\))/,
-  /\btest\.fixme\(\s*(?:['"`]|\))/,
+  /\b(?:test|it|describe)\.skip\(\s*(?:['"`]|\)|true\b)/,
+  /\btest\.fixme\(\s*(?:['"`]|\)|true\b)/,
   /\btest\.describe\.(?:skip|fixme)\(/,
   /\b(?:xit|xtest|xdescribe)\(/
 ];
