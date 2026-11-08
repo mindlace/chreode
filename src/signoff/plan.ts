@@ -21,6 +21,8 @@ export interface PlanInput {
   base: string;
   head: string;
   isWorktree: boolean;
+  /** Changed package.json / package-lock.json paths whose only change is the version. */
+  versionOnly: readonly string[];
 }
 
 export interface PlannedStep {
@@ -40,6 +42,9 @@ export interface Plan {
   triggers: string[];
   /** Changed paths no rule matched; each one fired every trigger. */
   unmatched: string[];
+  /** Changed paths no rule matched that were version-only bumps; each fired only the
+   *  config's versionBumpTriggers. */
+  versionOnly: string[];
   steps: PlannedStep[];
   skipped: { label: string; reason: SkipReason }[];
   /** Steps that would have run but for --skip: these go in the status description. */
@@ -70,21 +75,40 @@ export function allTriggers(steps: readonly ResolvedStep[]): string[] {
   return [...new Set(steps.flatMap((s) => s.when))].sort();
 }
 
-/** Rules can only make a run smaller by matching: an unmatched path fires everything. */
+export interface VersionBumps {
+  /** Paths whose only change is a version bump. */
+  versionOnly: readonly string[];
+  /** What such a path fires when no rule matched it. */
+  versionBumpTriggers: readonly string[];
+}
+
+/** Rules can only make a run smaller by matching: an unmatched path fires everything,
+ *  unless it is a version-only bump, which fires just the versionBumpTriggers. */
 export function fireTriggers(
   paths: readonly string[],
   rules: readonly RuleConfig[],
-  steps: readonly ResolvedStep[]
-): { triggers: string[]; unmatched: string[] } {
+  steps: readonly ResolvedStep[],
+  bumps: VersionBumps = { versionOnly: [], versionBumpTriggers: [] }
+): { triggers: string[]; unmatched: string[]; versionOnly: string[] } {
   const fired = new Set<string>();
   const unmatched: string[] = [];
+  const versionOnly: string[] = [];
+  const bumped = new Set(bumps.versionOnly);
   for (const path of paths) {
     const rule = matchRule(path, rules);
-    const triggers = rule === null ? allTriggers(steps) : rule.triggers;
-    if (rule === null) unmatched.push(path);
+    let triggers: readonly string[];
+    if (rule !== null) {
+      triggers = rule.triggers;
+    } else if (bumped.has(path)) {
+      versionOnly.push(path);
+      triggers = bumps.versionBumpTriggers;
+    } else {
+      unmatched.push(path);
+      triggers = allTriggers(steps);
+    }
     for (const t of triggers) fired.add(t);
   }
-  return { triggers: [...fired].sort(), unmatched };
+  return { triggers: [...fired].sort(), unmatched, versionOnly };
 }
 
 export function planSignoff(config: ResolvedConfig, input: PlanInput): Plan {
@@ -95,9 +119,12 @@ export function planSignoff(config: ResolvedConfig, input: PlanInput): Plan {
       `--skip names unknown step(s): ${unknownSkips.join(', ')} (known: ${known.join(', ')})`
     );
   }
-  const { triggers, unmatched } = input.full
-    ? { triggers: allTriggers(config.steps), unmatched: [] }
-    : fireTriggers(input.paths, config.rules, config.steps);
+  const { triggers, unmatched, versionOnly } = input.full
+    ? { triggers: allTriggers(config.steps), unmatched: [], versionOnly: [] }
+    : fireTriggers(input.paths, config.rules, config.steps, {
+        versionOnly: input.versionOnly,
+        versionBumpTriggers: config.versionBumpTriggers
+      });
   const ctx: StepContext = {
     base: input.base,
     head: input.head,
@@ -141,7 +168,7 @@ export function planSignoff(config: ResolvedConfig, input: PlanInput): Plan {
       timeoutMs: step.timeoutMs
     });
   }
-  return { triggers, unmatched, steps, skipped, skippedByFlag };
+  return { triggers, unmatched, versionOnly, steps, skipped, skippedByFlag };
 }
 
 export function describeSkip(reason: SkipReason): string {

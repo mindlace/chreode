@@ -20,6 +20,7 @@ describe('validateConfig', () => {
       baseBranch: 'main',
       statusContext: 'chreode/signoff',
       rules: [],
+      versionBumpTriggers: [],
       afterMerge: null,
       stderrAllowlist: [],
       protection: {},
@@ -86,6 +87,18 @@ describe('validateConfig', () => {
       'steps[0].when: must be a non-empty array of trigger names',
       'steps[0].timeoutMs: must be a positive number'
     ]);
+  });
+
+  it('keeps versionBumpTriggers and rejects malformed ones', () => {
+    expect(validateConfig({ steps: [lint], versionBumpTriggers: ['lint'] })).toMatchObject({
+      versionBumpTriggers: ['lint']
+    });
+    expect(validateConfig({ steps: [lint], versionBumpTriggers: [] })).toMatchObject({
+      versionBumpTriggers: []
+    });
+    const bad = 'config.versionBumpTriggers: must be an array of trigger names ([] runs nothing)';
+    expect(problems({ steps: [lint], versionBumpTriggers: 'lint' })).toEqual([bad]);
+    expect(problems({ steps: [lint], versionBumpTriggers: [''] })).toEqual([bad]);
   });
 
   it('rejects malformed rule matchers', () => {

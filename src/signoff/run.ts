@@ -12,6 +12,7 @@ import {
   type BaseInfo
 } from '../git/change-set.js';
 import { mergeBaseBranch } from '../git/merge.js';
+import { versionOnlyPaths } from '../git/version-only.js';
 import { repoInfo, type RepoInfo } from '../github/status.js';
 import { signoffLock, type MachineLock } from '../lock/machine-lock.js';
 import { defaultExec, defaultRun, type Exec, type Run } from '../run/exec.js';
@@ -91,6 +92,9 @@ export function printPlan(
   for (const p of where.paths) log(`  ${p}`);
   if (plan.unmatched.length > 0) {
     log(`[chreode] matched no rule, so every trigger fired: ${plan.unmatched.join(', ')}`);
+  }
+  if (plan.versionOnly.length > 0) {
+    log(`[chreode] version-only: ${plan.versionOnly.join(', ')}`);
   }
   log(`[chreode] triggers: ${plan.triggers.length > 0 ? plan.triggers.join(', ') : '(none)'}`);
   log(
@@ -206,7 +210,8 @@ export async function runSignoff(
       skip: opts.skip,
       base,
       head,
-      isWorktree: isWorktree(d.exec)
+      isWorktree: isWorktree(d.exec),
+      versionOnly: opts.full ? [] : versionOnlyPaths(base, head, paths, d.exec)
     });
   } catch (err) {
     if (err instanceof PlanError) {

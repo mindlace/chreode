@@ -13,7 +13,8 @@ const base: ResolvedConfig = {
   stderrAllowlist: [],
   protection: {},
   flakes: null,
-  burnIn: null
+  burnIn: null,
+  versionBumpTriggers: []
 };
 
 describe('protectionPayloads', () => {

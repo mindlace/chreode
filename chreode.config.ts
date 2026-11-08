@@ -9,8 +9,10 @@ const config: ChreodeConfig = {
     { match: ['src/**', 'test/**'], triggers: ['lint', 'typecheck', 'test'] },
     { match: ['.github/workflows/**'], triggers: ['format', 'workflows'] }
     // Everything else (package*.json, tsconfig*, eslint/vitest/prettier config, this file)
-    // matches no rule and runs every step.
+    // matches no rule and runs every step, except a package.json / package-lock.json whose
+    // only change is the version: that fires versionBumpTriggers instead.
   ],
+  versionBumpTriggers: ['format'],
   steps: [
     { label: 'format', run: 'npx prettier --check .', when: ['format'], supersededBy: ['lint'] },
     { label: 'lint', run: 'npm run lint', when: ['lint'] },
