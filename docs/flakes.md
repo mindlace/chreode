@@ -37,6 +37,13 @@ overflow is listed, never silently dropped). Any failure fails signoff: a test t
 birth flakes forever. Do not run repeat matrices by hand; signoff does it, the same way, every
 time. A deflake change touches the test file, so it is burned in automatically.
 
+**The timing check.** The `timing` step (`timingStep({ when })`) enforces the playbook's "never"
+list at the moment the code is written, reading only the lines a branch adds. Burn-in on an idle
+machine misses timing dependence; this check does not run tests at all. A violation names the
+file, line and rule: the fix is in _The playbook_ below (a readiness signal, not a longer wait).
+The only exemptions are `timing.perf` (performance tests, by path) and reviewed `timing.allow`
+entries with a reason; every exemption used is printed.
+
 ## The playbook
 
 Work the list top-down. It is ordered by how often each fix turned out to be the real one.
