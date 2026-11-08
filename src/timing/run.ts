@@ -1,6 +1,6 @@
 import { DEFAULT_PLAYBOOK_URL, type ResolvedConfig } from '../config/types.js';
 import { defaultExec, type Exec } from '../run/exec.js';
-import { checkTiming } from './check.js';
+import { checkTiming, isTimingChecked } from './check.js';
 import { parseDiff } from './diff.js';
 import { formatTimingReport } from './report.js';
 
@@ -9,13 +9,35 @@ export interface TimingDeps {
   log: (m: string) => void;
 }
 
-/** Pinned so the user's diff.* config, color config and diff/binary attributes cannot change
- *  what is parsed: no merged hunks (diff.interHunkContext), every file as text (a `-diff` or
- *  `binary` attribute), one hunk layout (diff.algorithm, diff.indentHeuristic) and one file
- *  order (diff.orderFile). parseDiff throws on anything else. Renames read as an add plus a
- *  delete; only added or modified files are listed. */
-export function timingDiffArgs(baseBranch: string, head: string): string[] {
+/** First pass: the added or modified paths in the range, NUL-separated. No `--text`, so binary
+ *  files the branch touches outside the checked paths are never read into memory. */
+export function timingNamesArgs(baseBranch: string, head: string): string[] {
   return [
+    '-c',
+    'core.quotePath=false',
+    'diff',
+    '--name-only',
+    '-z',
+    '--no-renames',
+    '--diff-filter=AM',
+    '--no-relative',
+    `origin/${baseBranch}...${head}`
+  ];
+}
+
+/** Second pass, over the checked `paths` only (taken literally, never as globs). Pinned so the
+ *  user's diff.* config, color config and diff/binary attributes cannot change what is parsed:
+ *  no merged hunks (diff.interHunkContext), every file as text (a `-diff` or `binary`
+ *  attribute), one hunk layout (diff.algorithm, diff.indentHeuristic) and one file order
+ *  (diff.orderFile). parseDiff throws on anything else. Renames read as an add plus a delete;
+ *  only added or modified files are listed. */
+export function timingDiffArgs(
+  baseBranch: string,
+  head: string,
+  paths: readonly string[]
+): string[] {
+  return [
+    '--literal-pathspecs',
     '-c',
     'core.quotePath=false',
     'diff',
@@ -33,7 +55,9 @@ export function timingDiffArgs(baseBranch: string, head: string): string[] {
     '--no-relative',
     '--src-prefix=a/',
     '--dst-prefix=b/',
-    `origin/${baseBranch}...${head}`
+    `origin/${baseBranch}...${head}`,
+    '--',
+    ...paths
   ];
 }
 
@@ -45,8 +69,13 @@ export function runTimingCheck(
   overrides: Partial<TimingDeps> = {}
 ): number {
   const deps: TimingDeps = { exec: defaultExec, log: console.log, ...overrides };
-  const diff = deps.exec('git', timingDiffArgs(config.baseBranch, head));
-  const result = checkTiming(parseDiff(diff), config.timing);
+  const names = deps.exec('git', timingNamesArgs(config.baseBranch, head));
+  const paths = names.split('\0').filter((p) => p !== '' && isTimingChecked(p, config.timing));
+  const files =
+    paths.length === 0
+      ? []
+      : parseDiff(deps.exec('git', timingDiffArgs(config.baseBranch, head, paths)));
+  const result = checkTiming(files, config.timing);
   const url = config.flakes?.playbookUrl ?? DEFAULT_PLAYBOOK_URL;
   for (const line of formatTimingReport(result, url)) deps.log(line);
   return result.violations.length > 0 ? 1 : 0;

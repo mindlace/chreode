@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fakeExec } from '../../test/support/fake-exec.js';
 import { resolveFlakes, resolveTiming, type ResolvedConfig } from '../config/types.js';
-import { runTimingCheck, timingDiffArgs } from './run.js';
+import { runTimingCheck, timingDiffArgs, timingNamesArgs } from './run.js';
 
 type TimingConfig = Pick<ResolvedConfig, 'baseBranch' | 'timing' | 'flakes'>;
 const config = (flakes: TimingConfig['flakes'] = null): TimingConfig => ({
@@ -17,16 +17,40 @@ const config = (flakes: TimingConfig['flakes'] = null): TimingConfig => ({
 const addedDiff = (path: string, line: number, text: string) =>
   `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -${line},0 +${line} @@\n+${text}\n`;
 
-function runFake(diff: string, cfg: TimingConfig) {
-  const { exec } = fakeExec({ ['git ' + timingDiffArgs('main', 'h').join(' ')]: diff });
+const namesKey = 'git ' + timingNamesArgs('main', 'h').join(' ');
+const diffKey = (paths: string[]) => 'git ' + timingDiffArgs('main', 'h', paths).join(' ');
+
+/** Fakes both git calls: the name-only listing (`names`) and the diff of `checked`. */
+function runFake(diff: string, cfg: TimingConfig, names: string[], checked = names) {
+  const { exec, calls } = fakeExec({
+    [namesKey]: names.map((n) => n + '\0').join(''),
+    [diffKey(checked)]: diff
+  });
   const logs: string[] = [];
   const code = runTimingCheck(cfg, 'h', { exec, log: (m) => logs.push(m) });
-  return { code, logs };
+  return { code, logs, calls };
 }
 
+describe('timingNamesArgs', () => {
+  it('lists added or modified paths, NUL-separated, without --text', () => {
+    expect(timingNamesArgs('main', 'h')).toEqual([
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--name-only',
+      '-z',
+      '--no-renames',
+      '--diff-filter=AM',
+      '--no-relative',
+      'origin/main...h'
+    ]);
+  });
+});
+
 describe('timingDiffArgs', () => {
-  it('pins every diff option against user config', () => {
-    expect(timingDiffArgs('main', 'h')).toEqual([
+  it('pins every diff option against user config and takes paths literally', () => {
+    expect(timingDiffArgs('main', 'h', ['e2e/a.spec.ts', 'e2e/[x].spec.ts'])).toEqual([
+      '--literal-pathspecs',
       '-c',
       'core.quotePath=false',
       'diff',
@@ -44,7 +68,10 @@ describe('timingDiffArgs', () => {
       '--no-relative',
       '--src-prefix=a/',
       '--dst-prefix=b/',
-      'origin/main...h'
+      'origin/main...h',
+      '--',
+      'e2e/a.spec.ts',
+      'e2e/[x].spec.ts'
     ]);
   });
 });
@@ -53,7 +80,8 @@ describe('runTimingCheck', () => {
   it('exits 1 and prints each violation', () => {
     const { code, logs } = runFake(
       addedDiff('e2e/editor.spec.ts', 42, 'await page.waitForTimeout(500);'),
-      config()
+      config(),
+      ['e2e/editor.spec.ts']
     );
     expect(code).toBe(1);
     expect(logs).toContain('[chreode] timing: 1 violation in 1 file');
@@ -72,7 +100,8 @@ describe('runTimingCheck', () => {
   it('links the configured playbook', () => {
     const { logs } = runFake(
       addedDiff('e2e/editor.spec.ts', 1, 'await page.waitForTimeout(500);'),
-      config(resolveFlakes({ playbookUrl: 'https://wiki/flakes' }))
+      config(resolveFlakes({ playbookUrl: 'https://wiki/flakes' })),
+      ['e2e/editor.spec.ts']
     );
     expect(logs.some((l) => l.includes('Fix: https://wiki/flakes#the-playbook'))).toBe(true);
   });
@@ -80,10 +109,32 @@ describe('runTimingCheck', () => {
   it('exits 0 on a clean diff', () => {
     const { code, logs } = runFake(
       addedDiff('e2e/editor.spec.ts', 3, "await expect(page.getByText('saved')).toBeVisible();"),
-      config()
+      config(),
+      ['e2e/editor.spec.ts']
     );
     expect(code).toBe(0);
     expect(logs).toEqual(['[chreode] timing: no timing crutches added in 1 checked file(s)']);
+  });
+
+  it('diffs only checked paths, never other changed files', () => {
+    const { code, calls } = runFake(
+      addedDiff('e2e/a.spec.ts', 1, 'await page.waitForTimeout(500);'),
+      config(),
+      ['assets/big.wasm', 'e2e/a.spec.ts', 'e2e/load.perf.ts', 'src/app.ts'],
+      ['e2e/a.spec.ts']
+    );
+    expect(code).toBe(1);
+    expect(calls).toEqual([namesKey, diffKey(['e2e/a.spec.ts'])]);
+    expect(calls[1]).not.toMatch(/big\.wasm|load\.perf|app\.ts/);
+  });
+
+  it('skips the diff when no changed file is checked', () => {
+    const { exec, calls } = fakeExec({ [namesKey]: 'assets/big.wasm\0src/app.ts\0' });
+    const logs: string[] = [];
+    const code = runTimingCheck(config(), 'h', { exec, log: (m) => logs.push(m) });
+    expect(code).toBe(0);
+    expect(calls).toEqual([namesKey]);
+    expect(logs).toEqual(['[chreode] timing: no test files changed; nothing to check']);
   });
 });
 
@@ -119,17 +170,20 @@ describe('against a real repository', () => {
       git('add', '-A');
       git('commit', '-q', '-m', msg);
     };
-    const exec = (file: string, args: readonly string[]) =>
-      execFileSync(file, [...args], {
-        cwd: work,
-        encoding: 'utf8',
-        env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
     const check = () => {
       const logs: string[] = [];
+      const calls: string[][] = [];
+      const exec = (file: string, args: readonly string[]) => {
+        calls.push([...args]);
+        return execFileSync(file, [...args], {
+          cwd: work,
+          encoding: 'utf8',
+          env,
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      };
       const code = runTimingCheck(config(), 'HEAD', { exec, log: (m) => logs.push(m) });
-      return { code, text: logs.join('\n') };
+      return { code, text: logs.join('\n'), calls };
     };
     return { root, work, git, write, commit, check };
   }
@@ -237,6 +291,36 @@ describe('against a real repository', () => {
       const { code, text } = t.check();
       expect(code).toBe(1);
       expect(text).toMatch(/e2e\/flow\.spec\.ts:4 +fixed-wait/);
+    });
+  });
+
+  it('diffs only checked paths: a binary outside them is never read as text', () => {
+    withBranch((t) => {
+      mkdirSync(join(t.work, 'assets'), { recursive: true });
+      writeFileSync(join(t.work, 'assets', 'big.bin'), Buffer.from([0, 1, 2, 255, 10, 0, 254]));
+      t.write('e2e/[x].spec.ts', wait);
+      t.write('e2e/x.spec.ts', "await expect(page.getByText('ok')).toBeVisible();\n");
+      t.commit('add');
+      const { code, text, calls } = t.check();
+      expect(code).toBe(1);
+      expect(text).toMatch(/e2e\/\[x\]\.spec\.ts:1 +fixed-wait/);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).not.toContain('assets/big.bin');
+      expect(calls[1].slice(calls[1].indexOf('--') + 1)).toEqual([
+        'e2e/[x].spec.ts',
+        'e2e/x.spec.ts'
+      ]);
+    });
+  });
+
+  it('makes one git call when the branch changes no checked file', () => {
+    withBranch((t) => {
+      t.write('src/app.ts', 'export {};\n');
+      t.commit('app');
+      const { code, text, calls } = t.check();
+      expect(code).toBe(0);
+      expect(text).toBe('[chreode] timing: no test files changed; nothing to check');
+      expect(calls).toHaveLength(1);
     });
   });
 

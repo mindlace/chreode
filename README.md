@@ -204,8 +204,8 @@ rules, each with a stable id:
   never flagged, so turning on flake telemetry (`retries: 1`) needs no exemption; raising retries
   above 1 is flagged. `retry: false` counts as 0; `retry: true` (unlimited) is flagged.
 - `skip`: a new unconditional `test.skip(`, `it.skip(`, `describe.skip(`, `test.fixme(`, `xit(` or
-  `xdescribe(` (a literal `true` condition counts as unconditional). A conditional platform gate such as `test.skip(browserName === 'webkit', '…')` is
-  not.
+  `xdescribe(` (a literal `true` condition counts as unconditional). A conditional platform gate
+  such as `test.skip(browserName === 'webkit', '…')` is not.
 
 Lines are compared per hunk, so moved code counts as new: a renamed or moved file is read as added
 in full, and a block moved far within a file reads as removed in one place and added in another.
