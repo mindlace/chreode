@@ -148,4 +148,33 @@ describe('parseDiff', () => {
   it('parses empty output', () => {
     expect(parseDiff('')).toEqual([]);
   });
+
+  describe('fails loudly on output it was not pinned to produce', () => {
+    const head = ['diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts'];
+
+    it('throws on a context line inside a merged hunk', () => {
+      const out = lines(...head, '@@ -1,3 +1,4 @@', '-x', ' keep', '-y', '+a', '+b', '+c');
+      expect(() => parseDiff(out)).toThrow(/a\.ts.*unexpected line " keep"/);
+    });
+
+    it('throws on an added line while removed lines are still expected', () => {
+      const out = lines(...head, '@@ -1,2 +1 @@', '-x', '+a', '-y');
+      expect(() => parseDiff(out)).toThrow(/unexpected line "\+a"/);
+    });
+
+    it('throws on a short hunk followed by another file', () => {
+      const out = lines(...head, '@@ -0,0 +1,3 @@', '+a', '+b', 'diff --git a/b.ts b/b.ts');
+      expect(() => parseDiff(out)).toThrow(/a\.ts.*1 added line\(s\) missing/);
+    });
+
+    it('throws on a short hunk at the end of the output', () => {
+      const out = lines(...head, '@@ -2,2 +1 @@', '-x');
+      expect(() => parseDiff(out)).toThrow(/a\.ts.*1 removed and 1 added line\(s\) missing/);
+    });
+
+    it('throws on a diff line after the counts are used up', () => {
+      const out = lines(...head, '@@ -0,0 +1 @@', '+a', '+b');
+      expect(() => parseDiff(out)).toThrow(/unexpected line "\+b"/);
+    });
+  });
 });

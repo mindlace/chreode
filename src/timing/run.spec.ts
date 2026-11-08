@@ -31,6 +31,11 @@ describe('timingDiffArgs', () => {
       'core.quotePath=false',
       'diff',
       '--unified=0',
+      '--inter-hunk-context=0',
+      '--text',
+      '--diff-algorithm=myers',
+      '--indent-heuristic',
+      '-O/dev/null',
       '--no-renames',
       '--diff-filter=AM',
       '--no-color',
@@ -85,16 +90,19 @@ describe('runTimingCheck', () => {
 describe('against a real repository', () => {
   function setup() {
     const root = mkdtempSync(join(tmpdir(), 'chreode-timing-'));
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))
-    );
+    // Hermetic: no GIT_* from the caller, and no global or system gitconfig.
+    const env = {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1'
+    };
     const run = (cwd: string, ...args: string[]) =>
       execFileSync('git', args, { cwd, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
     const origin = join(root, 'origin.git');
     const work = join(root, 'work');
     mkdirSync(origin);
     run(origin, 'init', '-q', '--bare', '-b', 'main');
-    run(root, 'clone', '-q', origin, work);
+    run(root, '-c', 'init.defaultBranch=main', 'clone', '-q', origin, work);
     for (const [k, v] of [
       ['user.email', 't@example.com'],
       ['user.name', 't'],
@@ -123,7 +131,7 @@ describe('against a real repository', () => {
       const code = runTimingCheck(config(), 'HEAD', { exec, log: (m) => logs.push(m) });
       return { code, text: logs.join('\n') };
     };
-    return { root, git, write, commit, check };
+    return { root, work, git, write, commit, check };
   }
 
   const wait = 'await page.waitForTimeout(100);\n';
@@ -187,6 +195,54 @@ describe('against a real repository', () => {
     withBranch((t) => {
       t.git('config', 'diff.noprefix', 'true');
       t.git('config', 'color.diff', 'always');
+      t.write('e2e/new.spec.ts', wait);
+      t.commit('add');
+      const { code, text } = t.check();
+      expect(code).toBe(1);
+      expect(text).toMatch(/e2e\/new\.spec\.ts:1 +fixed-wait/);
+    });
+  });
+
+  const body = (...l: string[]) => l.join('\n') + '\n';
+  const legacy = body(
+    "test('a', async ({ page }) => {",
+    "  await page.goto('/');",
+    "  await page.click('#one');",
+    "  await page.click('#two');",
+    '});'
+  );
+  const edited = body(
+    "test('a', async ({ page }) => {",
+    "  await page.goto('/home');",
+    "  await page.click('#one');",
+    '  await page.waitForTimeout(500);',
+    "  await page.click('#two');",
+    '});'
+  );
+
+  it("flags a wait despite the user's interHunkContext, diff algorithm and -diff attribute", () => {
+    withBranch((t) => {
+      t.write('e2e/flow.spec.ts', legacy);
+      t.commit('flow');
+      t.git('push', '-q', 'origin', 'feature:main');
+      t.git('fetch', '-q', 'origin');
+      t.git('config', 'diff.interHunkContext', '1000');
+      t.git('config', 'diff.algorithm', 'patience');
+      t.git('config', 'diff.indentHeuristic', 'false');
+      t.git('config', 'diff.orderFile', 'README.md');
+      mkdirSync(join(t.work, '.git', 'info'), { recursive: true });
+      writeFileSync(join(t.work, '.git', 'info', 'attributes'), '*.spec.ts -diff\n');
+      t.write('e2e/flow.spec.ts', edited);
+      t.commit('edit two nearby places');
+      const { code, text } = t.check();
+      expect(code).toBe(1);
+      expect(text).toMatch(/e2e\/flow\.spec\.ts:4 +fixed-wait/);
+    });
+  });
+
+  it('flags a wait in a file a committed .gitattributes marks binary', () => {
+    withBranch((t) => {
+      t.write('.gitattributes', 'e2e/** binary\n');
       t.write('e2e/new.spec.ts', wait);
       t.commit('add');
       const { code, text } = t.check();

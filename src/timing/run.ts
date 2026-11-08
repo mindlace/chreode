@@ -9,14 +9,22 @@ export interface TimingDeps {
   log: (m: string) => void;
 }
 
-/** Pinned so the user's diff.* and color config cannot change what is parsed. Renames read
- *  as an add plus a delete; only added or modified files are listed. */
+/** Pinned so the user's diff.* config, color config and diff/binary attributes cannot change
+ *  what is parsed: no merged hunks (diff.interHunkContext), every file as text (a `-diff` or
+ *  `binary` attribute), one hunk layout (diff.algorithm, diff.indentHeuristic) and one file
+ *  order (diff.orderFile). parseDiff throws on anything else. Renames read as an add plus a
+ *  delete; only added or modified files are listed. */
 export function timingDiffArgs(baseBranch: string, head: string): string[] {
   return [
     '-c',
     'core.quotePath=false',
     'diff',
     '--unified=0',
+    '--inter-hunk-context=0',
+    '--text',
+    '--diff-algorithm=myers',
+    '--indent-heuristic',
+    '-O/dev/null',
     '--no-renames',
     '--diff-filter=AM',
     '--no-color',
