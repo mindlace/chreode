@@ -61,8 +61,9 @@ Wire them into `package.json` as `"signoff": "chreode signoff"` and
 3. **Base**: `--base`, else the nearest commit on the branch carrying a `refs/notes/chreode`
    note (the last successful signoff), else the merge-base with `origin/<baseBranch>`.
 4. **Plan**: changed paths (both sides of renames, deletions included) → triggers (first
-   matching rule; a path no rule matches fires every trigger) → steps (`when`, `if`,
-   `--skip`, `supersededBy`). The plan and every skipped step's reason are printed.
+   matching rule; a path no rule matches fires every trigger, unless it is a version-only
+   `package.json` / `package-lock.json` bump, which fires `versionBumpTriggers`) → steps
+   (`when`, `if`, `--skip`, `supersededBy`). The plan and every skipped step's reason are printed.
 5. **Run** the steps in order under one machine-wide lock shared by every chreode repo on the
    machine. Each step runs in its own process group with a hard timeout; policed steps fail
    on unexpected stderr. Children see `CHREODE_SIGNOFF=1`.
@@ -200,6 +201,7 @@ export default defineConfig({
     { match: 'src/**', triggers: ['lint', 'check', 'unit', 'e2e'] },
     { match: 'generated/**', triggers: [] } // matched, nothing to run
   ],
+  versionBumpTriggers: ['format'], // default []: see below
   steps: [
     { label: 'format', run: 'npx prettier --check .', when: ['format'], supersededBy: ['lint'] },
     { label: 'lint', run: 'npm run lint', when: ['lint'] },
@@ -222,6 +224,15 @@ export default defineConfig({
 glob, dotfiles included, or a RegExp, or an array of them) matches a changed path decides its
 triggers. A path no rule matches fires every trigger: rules can only make runs smaller, so a
 forgotten rule costs time, never coverage. Triggers are free-form strings.
+
+**Version bumps** are the one exception. A `package.json` or `package-lock.json` (at any depth)
+that matches no rule, exists on both sides, and whose only change is its version (for the
+lockfile, the top-level `version` and `packages[""].version`; key order and formatting are
+ignored) fires `versionBumpTriggers` instead of every trigger. The default is `[]`, so a
+release commit that only bumps the version runs nothing. The plan prints such paths as
+`version-only: package.json`. A rule that matches the file still wins, any other change to
+it (or an added, deleted or unparseable file) fires everything as before, and `--full`
+ignores the distinction.
 
 **Steps** run in config order.
 

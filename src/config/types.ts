@@ -88,6 +88,9 @@ export interface ChreodeConfig {
   baseBranch?: string;
   statusContext?: string;
   rules?: RuleConfig[];
+  /** Fired, instead of every trigger, by a package.json / package-lock.json that matched no
+   *  rule and whose only change is its version. Default [] (a version bump runs nothing). */
+  versionBumpTriggers?: string[];
   steps: StepConfig[];
   /** Runs only when the merge of origin/<baseBranch> actually changed the branch. */
   afterMerge?: string;
@@ -107,6 +110,7 @@ export interface ResolvedConfig {
   baseBranch: string;
   statusContext: string;
   rules: RuleConfig[];
+  versionBumpTriggers: string[];
   steps: ResolvedStep[];
   afterMerge: string | null;
   stderrAllowlist: AllowlistEntry[];

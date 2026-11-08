@@ -19,6 +19,7 @@ const CONFIG: ResolvedConfig = {
   protection: {},
   flakes: null,
   burnIn: null,
+  versionBumpTriggers: [],
   rules: [
     { match: 'docs/**', triggers: [] },
     { match: 'src/**', triggers: ['lint'] }
@@ -240,6 +241,29 @@ describe('runSignoff', () => {
     const h = harness({ 'git diff --name-only --no-renames -z b..h': 'docs/a.md\0' });
     expect(await runSignoff(load(CONFIG), OPTS, h.deps)).toBe(0);
     expect(h.events).toEqual(['push', 'status h signed off by me@example.com', 'note h []']);
+  });
+
+  it('a version-only package.json bump runs only versionBumpTriggers, and says so', async () => {
+    const pkg = (version: string) => JSON.stringify({ name: 'w', version });
+    const h = harness({
+      'git diff --name-only --no-renames -z b..h': 'package.json\0',
+      'git show b:package.json': pkg('1.0.0'),
+      'git show h:package.json': pkg('1.1.0')
+    });
+    const logs: string[] = [];
+    const bump = { ...CONFIG, versionBumpTriggers: ['lint'] };
+    expect(await runSignoff(load(bump), OPTS, { ...h.deps, log: (m) => void logs.push(m) })).toBe(
+      0
+    );
+    expect(h.events).toContain('run lint');
+    expect(logs).toContain('[chreode] version-only: package.json');
+    expect(logs.join('\n')).not.toContain('matched no rule');
+  });
+
+  it('--full does not inspect package.json versions', async () => {
+    const h = harness({ 'git diff --name-only --no-renames -z b..h': 'package.json\0' });
+    expect(await runSignoff(load(CONFIG), { ...OPTS, full: true, dryRun: true }, h.deps)).toBe(0);
+    expect(h.calls.some((c) => c.startsWith('git show'))).toBe(false);
   });
 
   it('a failing step exits 1, releases the lock, and posts nothing', async () => {

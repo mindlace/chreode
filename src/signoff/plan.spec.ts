@@ -4,8 +4,13 @@ import { PlanError, fireTriggers, matchRule, planSignoff, type PlanInput } from 
 
 type StepSpec = Partial<ResolvedStep> & { label: string; when: string[] };
 
-function config(rules: RuleConfig[], steps: StepSpec[]): ResolvedConfig {
+function config(
+  rules: RuleConfig[],
+  steps: StepSpec[],
+  versionBumpTriggers: string[] = []
+): ResolvedConfig {
   return {
+    versionBumpTriggers,
     baseBranch: 'main',
     statusContext: 'chreode/signoff',
     afterMerge: null,
@@ -31,6 +36,7 @@ const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   base: 'b',
   head: 'h',
   isWorktree: false,
+  versionOnly: [],
   ...over
 });
 
@@ -73,7 +79,8 @@ describe('fireTriggers', () => {
     const cfg = config(RULES, STEPS);
     expect(fireTriggers(['Makefile', 'docs/a.md'], cfg.rules, cfg.steps)).toEqual({
       triggers: ['format', 'lint', 'unit', 'workflows'],
-      unmatched: ['Makefile']
+      unmatched: ['Makefile'],
+      versionOnly: []
     });
   });
 
@@ -81,8 +88,40 @@ describe('fireTriggers', () => {
     const cfg = config(RULES, STEPS);
     expect(fireTriggers(['generated/x.json'], cfg.rules, cfg.steps)).toEqual({
       triggers: [],
-      unmatched: []
+      unmatched: [],
+      versionOnly: []
     });
+  });
+
+  it('a version-only unmatched path fires only versionBumpTriggers (default none)', () => {
+    const cfg = config(RULES, STEPS);
+    expect(
+      fireTriggers(['package.json'], cfg.rules, cfg.steps, {
+        versionOnly: ['package.json'],
+        versionBumpTriggers: cfg.versionBumpTriggers
+      })
+    ).toEqual({ triggers: [], unmatched: [], versionOnly: ['package.json'] });
+    expect(
+      fireTriggers(['package.json', 'Makefile'], cfg.rules, cfg.steps, {
+        versionOnly: ['package.json'],
+        versionBumpTriggers: ['format']
+      })
+    ).toEqual({
+      triggers: ['format', 'lint', 'unit', 'workflows'],
+      unmatched: ['Makefile'],
+      versionOnly: ['package.json']
+    });
+  });
+
+  it('a rule match beats version-only', () => {
+    const rules: RuleConfig[] = [{ match: '**/package.json', triggers: ['unit'] }];
+    const cfg = config(rules, STEPS);
+    expect(
+      fireTriggers(['package.json'], cfg.rules, cfg.steps, {
+        versionOnly: ['package.json'],
+        versionBumpTriggers: ['format']
+      })
+    ).toEqual({ triggers: ['unit'], unmatched: [], versionOnly: [] });
   });
 });
 
@@ -95,6 +134,45 @@ describe('planSignoff', () => {
       'unit',
       'workflows'
     ]);
+  });
+
+  it('a version-only bump runs nothing by default', () => {
+    const plan = planSignoff(
+      cfg,
+      input({
+        paths: ['package.json', 'package-lock.json'],
+        versionOnly: ['package.json', 'package-lock.json']
+      })
+    );
+    expect(plan.steps).toEqual([]);
+    expect(plan.unmatched).toEqual([]);
+    expect(plan.versionOnly).toEqual(['package.json', 'package-lock.json']);
+  });
+
+  it('a version-only bump runs the versionBumpTriggers steps', () => {
+    const bump = config(RULES, STEPS, ['format']);
+    expect(labels(bump, input({ paths: ['package.json'], versionOnly: ['package.json'] }))).toEqual(
+      ['format']
+    );
+  });
+
+  it('a package.json that is not version-only still fires everything', () => {
+    const plan = planSignoff(
+      config(RULES, STEPS, ['format']),
+      input({ paths: ['package.json'], versionOnly: [] })
+    );
+    expect(plan.steps.map((s) => s.label)).toEqual(['lint', 'unit', 'workflows']);
+    expect(plan.unmatched).toEqual(['package.json']);
+    expect(plan.versionOnly).toEqual([]);
+  });
+
+  it('--full ignores version-only', () => {
+    const plan = planSignoff(
+      cfg,
+      input({ paths: ['package.json'], versionOnly: ['package.json'], full: true })
+    );
+    expect(plan.steps.map((s) => s.label)).toEqual(['lint', 'unit', 'workflows']);
+    expect(plan.versionOnly).toEqual([]);
   });
 
   it('a docs-only change runs only the docs step', () => {

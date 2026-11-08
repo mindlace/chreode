@@ -28,6 +28,7 @@ const TOP_KEYS = new Set([
   'baseBranch',
   'statusContext',
   'rules',
+  'versionBumpTriggers',
   'steps',
   'afterMerge',
   'stderrAllowlist',
@@ -113,6 +114,17 @@ function validateRules(raw: unknown, problems: string[]): RuleConfig[] {
     }
   });
   return raw as RuleConfig[];
+}
+
+function validateVersionBumpTriggers(raw: unknown, problems: string[]): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || !raw.every(isNonEmptyString)) {
+    problems.push(
+      'config.versionBumpTriggers: must be an array of trigger names ([] runs nothing)'
+    );
+    return [];
+  }
+  return raw;
 }
 
 function validateSteps(raw: unknown, problems: string[]): ResolvedStep[] {
@@ -285,6 +297,7 @@ export function validateConfig(raw: unknown): ResolvedConfig {
     }
   }
   const rules = validateRules(raw.rules, problems);
+  const versionBumpTriggers = validateVersionBumpTriggers(raw.versionBumpTriggers, problems);
   const steps = validateSteps(raw.steps, problems);
   const stderrAllowlist = validateAllowlist(raw.stderrAllowlist, problems);
   const protection = validateProtection(raw.protection, problems);
@@ -295,6 +308,7 @@ export function validateConfig(raw: unknown): ResolvedConfig {
     baseBranch: (raw.baseBranch as string | undefined) ?? DEFAULT_BASE_BRANCH,
     statusContext: (raw.statusContext as string | undefined) ?? DEFAULT_STATUS_CONTEXT,
     rules,
+    versionBumpTriggers,
     steps,
     afterMerge: (raw.afterMerge as string | undefined) ?? null,
     stderrAllowlist,
