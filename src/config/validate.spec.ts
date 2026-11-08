@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { matchesAny } from '../signoff/plan.js';
+import { DEFAULT_TIMING_MATCH, DEFAULT_TIMING_PERF, resolveTiming } from './types.js';
 import { ConfigError, validateConfig } from './validate.js';
 
 const lint = { label: 'lint', run: 'npm run lint', when: ['lint'] };
@@ -25,7 +27,13 @@ describe('validateConfig', () => {
       stderrAllowlist: [],
       protection: {},
       flakes: null,
-      burnIn: null
+      burnIn: null,
+      timing: {
+        match: [...DEFAULT_TIMING_MATCH],
+        perf: [...DEFAULT_TIMING_PERF],
+        disable: [],
+        allow: []
+      }
     });
     expect(config.steps[0]).toMatchObject({
       label: 'lint',
@@ -195,5 +203,81 @@ describe('validateConfig', () => {
         'burnIn.runners[1]: must be an object'
       ]);
     });
+  });
+});
+
+describe('timing', () => {
+  it('resolves a block, wrapping single matchers', () => {
+    const allow = { path: 'e2e/**', rule: 'skip', reason: 'tracked in #12' };
+    expect(
+      validateConfig({
+        steps: [lint],
+        timing: { match: 'e2e/**', disable: ['skip'], allow: [allow] }
+      }).timing
+    ).toEqual({
+      match: ['e2e/**'],
+      perf: [...DEFAULT_TIMING_PERF],
+      disable: ['skip'],
+      allow: [allow]
+    });
+  });
+
+  it('reports every problem in the block', () => {
+    expect(
+      problems({
+        steps: [lint],
+        timing: {
+          match: [],
+          perf: 3,
+          disable: ['fixed-wait', 'sleep'],
+          allow: [
+            { path: 'e2e/**', rule: 'skip', reason: '' },
+            { path: [], rule: 'nope', pattern: 'x', reason: 'r', why: 1 },
+            'e2e/**'
+          ],
+          strict: true
+        }
+      })
+    ).toEqual([
+      'timing: unknown key "strict"',
+      'timing.match: must be a glob string, a RegExp, or a non-empty array of them',
+      'timing.perf: must be a glob string, a RegExp, or a non-empty array of them',
+      'timing.disable[1]: must be one of fixed-wait, timeout-raise, retries-raise, skip',
+      'timing.allow[0].reason: must be a non-empty string',
+      'timing.allow[1]: unknown key "why"',
+      'timing.allow[1].path: must be a glob string, a RegExp, or a non-empty array of them',
+      'timing.allow[1].rule: must be one of fixed-wait, timeout-raise, retries-raise, skip',
+      'timing.allow[1].pattern: must be a RegExp',
+      'timing.allow[2]: must be an object'
+    ]);
+    expect(problems({ steps: [lint], timing: [] })).toEqual(['config.timing: must be an object']);
+    expect(problems({ steps: [lint], timing: { disable: 'skip', allow: {} } })).toEqual([
+      'timing.disable: must be an array of rule ids',
+      'timing.allow: must be an array'
+    ]);
+  });
+
+  it('resolveTiming defaults', () => {
+    const { match, perf } = resolveTiming();
+    for (const p of [
+      'e2e/a.spec.ts',
+      'src/x.test.tsx',
+      'playwright.config.ts',
+      'apps/web/vitest.config.mts',
+      'test/support/x.ts'
+    ]) {
+      expect(matchesAny(p, match), p).toBe(true);
+    }
+    for (const p of ['src/x.ts', 'playwright.bench.config.ts']) {
+      expect(matchesAny(p, match), p).toBe(false);
+    }
+    for (const p of [
+      'src/map.perf.svelte.spec.ts',
+      'e2e/perf/load.spec.ts',
+      'e2e/x.bench.spec.ts',
+      'e2e/bench/run.spec.ts'
+    ]) {
+      expect(matchesAny(p, perf), p).toBe(true);
+    }
   });
 });
