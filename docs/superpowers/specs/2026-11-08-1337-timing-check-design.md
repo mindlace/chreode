@@ -56,7 +56,8 @@ It mirrors burn-in.
 timing?: {
   /** Files the check reads. Default: common test-file and test-config globs (below). */
   match?: Matcher | Matcher[];
-  /** Performance tests: never checked. Default: ['**/*.perf.*', '**/perf/**']. */
+  /** Performance tests: never checked.
+   *  Default: ['**/*.perf.*', '**/perf/**', '**/*.bench.*', '**/bench/**']. */
   perf?: Matcher | Matcher[];
   /** Rules to turn off, by id. */
   disable?: TimingRuleId[];
@@ -110,6 +111,11 @@ cannot tell whether it went up.
 
 - **Performance tests** are exempt wholesale, by path (`timing.perf`). The path convention is
   visible in review and in the file tree; a title tag would let any test opt out by renaming.
+  The defaults follow sfhousing, currently the only consumer with such tests: `*.perf.spec.ts`,
+  `*.perf.svelte.spec.ts`, `e2e/perf/**`, `*.bench.spec.ts` and `e2e/bench/**` are all exempt.
+  Test configs dedicated to these suites (`playwright.bench.config.ts`) fall outside the default
+  `match` and are never read; the `match` glob must not be widened to `playwright*.config.*`
+  without also exempting them.
 - **Everything else** goes through `timing.allow`, with a required `reason`, in
   `chreode.config.ts`. Editing that file is itself a reviewed change. An allow entry matches a
   violation when its path matches, its rule matches, and its `pattern` (if any) matches the line.
