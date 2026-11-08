@@ -1,6 +1,6 @@
 # chreode timing check — design
 
-Status: draft · 2026-11-08
+Status: approved · 2026-11-08
 
 ## Why
 
@@ -44,7 +44,7 @@ cannot: "this timeout went from 5s to 30s", "retries went from 1 to 3".
 
 It mirrors burn-in.
 
-- `chreode timing-check --base <sha> --head <sha>`: a CLI subcommand. It exits 1 and prints
+- `chreode timing-check [--head <sha>]`: a CLI subcommand (range below). It exits 1 and prints
   each violation (path:line, rule, the offending line, and a pointer to the playbook entry).
   It exits 0 and prints a one-line summary otherwise.
 - `timingStep({ when, timeoutMs? })`: a config helper that returns a `StepConfig` with label
