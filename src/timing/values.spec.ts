@@ -68,6 +68,27 @@ describe('timeoutRaise', () => {
   it('ignores comments', () => {
     expect(timeoutRaise(h([], ['// timeout: 99_999 for local debugging']))).toEqual([]);
   });
+
+  it.each([
+    'interface WaitOpts { timeout: number; retries: number }',
+    '  timeout: number;',
+    '  timeout?: number;',
+    '  navigationTimeout: number | undefined;',
+    '  testTimeout: unknown,',
+    '  actionTimeout: any;',
+    'type T = { timeout: string | number[] };',
+    'function waitFor(sel: string, timeout: number) {',
+    'const pick = ({ timeout }: { timeout: boolean }) => timeout;'
+  ])('ignores the type annotation %s', (t) => {
+    expect(timeoutRaise(h([], [t]))).toEqual([]);
+  });
+
+  it.each(['timeout: undefined,', 'timeout: null,', 'function f(timeout: number = 60_000) {'])(
+    'still flags the value %s',
+    (t) => {
+      expect(timeoutRaise(h([], [t]))).toHaveLength(1);
+    }
+  );
 });
 
 describe('retriesRaise', () => {
@@ -111,5 +132,35 @@ describe('retriesRaise', () => {
 
   it('ignores comments', () => {
     expect(retriesRaise(h([], ['// retries: 5 on CI']))).toEqual([]);
+  });
+
+  it.each([
+    'interface WaitOpts { timeout: number; retries: number }',
+    '  retries: number;',
+    '  retries?: number;',
+    '  retry: boolean | number,',
+    'function poll(fn: () => boolean, retries: number) {'
+  ])('ignores the type annotation %s', (t) => {
+    expect(retriesRaise(h([], [t]))).toEqual([]);
+  });
+
+  it('reads retry: false as 0', () => {
+    expect(
+      retriesRaise(h([], ['new QueryClient({ defaultOptions: { queries: { retry: false } } });']))
+    ).toEqual([]);
+    expect(retriesRaise(h(['retry: 3,'], ['retry: false,']))).toEqual([]);
+    expect(retriesRaise(h(['retry: false,'], ['retry: 2,']))).toEqual([
+      { rule: 'retries-raise', line: 1, text: 'retry: 2,', was: 'false' }
+    ]);
+  });
+
+  it('flags retry: true (unlimited retries)', () => {
+    expect(retriesRaise(h([], ['queries: { retry: true },']))).toEqual([
+      { rule: 'retries-raise', line: 1, text: 'queries: { retry: true },' }
+    ]);
+  });
+
+  it('still flags a defaulted parameter', () => {
+    expect(retriesRaise(h([], ['function poll(retries: number = 5) {']))).toHaveLength(1);
   });
 });
