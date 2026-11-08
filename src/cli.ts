@@ -11,6 +11,7 @@ import { parseRepo } from './github/status.js';
 import { runProtect } from './github/protect.js';
 import { defaultExec } from './run/exec.js';
 import { runSignoff, type SignoffOptions } from './signoff/run.js';
+import { runTimingCheck } from './timing/run.js';
 
 export interface SignoffFlags {
   full?: boolean;
@@ -35,6 +36,11 @@ export interface FlakeReportFlags {
 
 export interface BurnInFlags {
   base: string;
+  head: string;
+  config?: string;
+}
+
+export interface TimingCheckFlags {
   head: string;
   config?: string;
 }
@@ -68,6 +74,7 @@ export function buildProgram(
     protect: (flags: ProtectFlags) => Promise<number>;
     flakeReport: (flags: FlakeReportFlags) => Promise<number>;
     burnIn: (flags: BurnInFlags) => Promise<number>;
+    timingCheck: (flags: TimingCheckFlags) => Promise<number>;
   },
   setExit: (code: number) => void
 ): Command {
@@ -117,6 +124,15 @@ export function buildProgram(
     .option('--config <path>', `config file (default: <repo root>/${CONFIG_FILE})`)
     .action(async (flags: BurnInFlags) => setExit(await actions.burnIn(flags)));
 
+  program
+    .command('timing-check')
+    .description(
+      'fail if the branch adds timing crutches to tests (fixed waits, raised timeouts or retries, skips)'
+    )
+    .option('--head <sha>', 'check origin/<baseBranch>...this commit', 'HEAD')
+    .option('--config <path>', `config file (default: <repo root>/${CONFIG_FILE})`)
+    .action(async (flags: TimingCheckFlags) => setExit(await actions.timingCheck(flags)));
+
   return program;
 }
 
@@ -149,7 +165,9 @@ export async function main(
         runBurnIn((await repoConfigLoader(flags.config)()).burnIn, {
           base: flags.base,
           head: flags.head
-        })
+        }),
+      timingCheck: async (flags) =>
+        runTimingCheck(await repoConfigLoader(flags.config)(), flags.head)
     },
     (c) => {
       code = c;
