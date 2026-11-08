@@ -1,5 +1,6 @@
 import type { TimingRuleId } from '../config/types.js';
 import type { Hunk } from './diff.js';
+import { retriesRaise, timeoutRaise } from './values.js';
 
 export interface Finding {
   rule: TimingRuleId;
@@ -65,6 +66,8 @@ export function evaluateHunk(hunk: Hunk, rules: readonly TimingRuleId[]): Findin
   rules.forEach((rule, order) => {
     let findings: Finding[] = [];
     if (rule === 'fixed-wait') findings = netNew(hunk, rule, isFixedWait);
+    else if (rule === 'timeout-raise') findings = timeoutRaise(hunk);
+    else if (rule === 'retries-raise') findings = retriesRaise(hunk);
     else if (rule === 'skip') findings = netNew(hunk, rule, isSkip);
     for (const finding of findings) found.push({ finding, order });
   });
