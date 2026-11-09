@@ -1,0 +1,5 @@
+{
+  "checks": ["npm run lint", "npm run test", "npm run build"],
+  "attest": "npm run signoff",
+  "release": { "kind": "tag", "tagPrefix": "v", "bump": "patch" }
+}
