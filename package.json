@@ -82,7 +82,7 @@
     "@types/picomatch": "^4.0.3",
     "@types/proper-lockfile": "^4.1.4",
     "eslint": "^10.14.0",
-    "eslint-config-prettier": "^10.1.8",
+    "eslint-config-prettier": "^10.1.9",
     "globals": "^17.14.0",
     "playwright": "^1.65.1",
     "prettier": "^3.10.1",
